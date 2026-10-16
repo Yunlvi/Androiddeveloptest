@@ -1,0 +1,33 @@
+# 默认按文本处理，Git 自动规范化换行符
+* text=auto
+
+# ---- 源码与配置文件 ----
+*.java          text
+*.kt            text
+*.kts           text
+*.xml           text
+*.toml          text
+*.properties    text
+*.md            text
+*.txt           text
+.gitignore      text
+.gitattributes  text
+
+# ---- 二进制文件：不做换行符转换 ----
+*.jar           binary
+*.png           binary
+*.jpg           binary
+*.jpeg          binary
+*.webp          binary
+*.gif           binary
+*.ttf           binary
+*.otf           binary
+*.apk           binary
+*.aab           binary
+*.so            binary
+
+# ---- Gradle wrapper ----
+# gradlew 是 shell 脚本，必须保持 LF，否则 Linux/macOS 上会报 bad interpreter
+gradlew         text eol=lf
+gradlew.bat     text eol=crlf
+*.bat           text eol=crlf
