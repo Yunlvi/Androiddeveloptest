@@ -87,7 +87,11 @@ public class CurvedNavBar extends View {
      * 选中项变化回调
      */
     public interface OnItemSelectedListener {
+        /** 选中项确定变化（点击后 / 拖动进入新区间） */
         void onItemSelected(int index);
+
+        /** 拖动中的连续进度（0 ~ ITEM_COUNT-1），用于页面跟手 */
+        void onProgressChanged(float progress);
     }
 
     private OnItemSelectedListener listener;
@@ -260,13 +264,14 @@ public class CurvedNavBar extends View {
         float from = glowAngle;
         float to = items[index].angle;
 
-        // 同步所有 item 的选中状态
         for (int i = 0; i < ITEM_COUNT; i++) {
             items[i].selected = (i == index);
         }
+
         selectedIndex = index;
 
         glowAnimator = ValueAnimator.ofFloat(from, to);
+
         glowAnimator.setDuration(300);
         glowAnimator.setInterpolator(new DecelerateInterpolator());
         glowAnimator.addUpdateListener(animation -> {
@@ -275,6 +280,11 @@ public class CurvedNavBar extends View {
             invalidate();
         });
         glowAnimator.start();
+
+        // ★ 通知外部：页面滑到目标页（吸附时也需要归位）
+        if (listener != null) {
+            listener.onItemSelected(index);
+        }
     }
 
     @Override
@@ -438,6 +448,26 @@ public class CurvedNavBar extends View {
     }
 
     /**
+     * 把光晕角度换算成页面进度（0 ~ ITEM_COUNT-1）
+     *
+     * 注意：items[0] 角度最大（最左），items[4] 角度最小（最右）
+     * 而 progress 0 = 最左页，所以要做反向映射
+     */
+    private float angleToProgress(float angleDeg) {
+        float maxAngle = items[0].angle;                 // 最左（角度最大）
+        float minAngle = items[ITEM_COUNT - 1].angle;    // 最右（角度最小）
+
+        if (maxAngle - minAngle <= 0.001f) return 0f;    // 防除零
+
+        // 归一化到 [0, 1]
+        float t = (maxAngle - angleDeg) / (maxAngle - minAngle);
+        t = Math.max(0f, Math.min(1f, t));
+
+        // 映射到 [0, ITEM_COUNT-1]
+        return t * (ITEM_COUNT - 1);
+    }
+
+    /**
      * 按下/回弹的缩放动画
      *
      * @param down true = 缩小（按下），false = 弹回（松手）
@@ -526,7 +556,7 @@ public class CurvedNavBar extends View {
                 // 判定当前落在哪个 item，变了就切
                 int idx = angleToIndex(glowAngle);
                 if (idx != selectedIndex) {
-                    applySelection(idx);
+                    applySelection(idx, false);
                 }
                 invalidate();
                 return true;
@@ -577,7 +607,8 @@ public class CurvedNavBar extends View {
      * 立即选中某个 item（无动画）
      * 拖动时用这个，因为光晕位置已经由手指决定了
      */
-    private void applySelection(int index) {
+
+    private void applySelection(int index, boolean notify) {
         if (index < 0 || index >= ITEM_COUNT) return;
 
         for (int i = 0; i < ITEM_COUNT; i++) {
@@ -585,9 +616,98 @@ public class CurvedNavBar extends View {
         }
         selectedIndex = index;
 
-        // 通知外部（页面切换用，后面接）
-        if (listener != null) {
+        if (notify && listener != null) {
             listener.onItemSelected(index);
         }
     }
+
+    // ===== 全局触摸（由 Activity 转发）=====
+    private boolean globalTracking = false;   // Activity 是否已通知按下
+
+    /**
+     * Activity 在 ACTION_DOWN 时调用，开始监听长按
+     */
+    public void onGlobalDown(float x, float y) {
+        lastDownX = x;
+        globalTracking = true;
+
+        if (!isDragging) {
+            handler.postDelayed(longPressRunnable, LONG_PRESS_MS);
+        }
+    }
+
+    /**
+     * Activity 在每个事件时调用，返回 true 表示导航栏接管
+     */
+    public boolean onGlobalTouch(MotionEvent ev) {
+        if (!isDragging) {
+            // 还没进入拖动模式 → 不接管
+            if (ev.getActionMasked() == MotionEvent.ACTION_UP
+                    || ev.getActionMasked() == MotionEvent.ACTION_CANCEL) {
+                handler.removeCallbacks(longPressRunnable);
+                globalTracking = false;
+            }
+            return false;
+        }
+
+        // 已进入拖动模式 → 接管所有事件
+        handleDragEvent(ev);
+        return true;
+    }
+
+    /**
+     * 是否处于全局拖动中
+     */
+    public boolean isGlobalDragging() {
+        return isDragging;
+    }
+
+    /**
+     * 取消全局监听（长按判定失败时）
+     */
+    public void cancelGlobalTracking() {
+        handler.removeCallbacks(longPressRunnable);
+        globalTracking = false;
+    }
+
+    /**
+     * 处理拖动中的事件（MOVE / UP / CANCEL）
+     */
+    private void handleDragEvent(MotionEvent ev) {
+        switch (ev.getActionMasked()) {
+            case MotionEvent.ACTION_MOVE: {
+                float dx = ev.getX() - dragStartX;
+                float deltaDeg = (float) Math.toDegrees(-dx / radius);
+                float newAngle = dragStartAngle + deltaDeg;
+
+                float minAngle = items[ITEM_COUNT - 1].angle;
+                float maxAngle = items[0].angle;
+                newAngle = Math.max(minAngle, Math.min(maxAngle, newAngle));
+
+                glowAngle = newAngle;
+                updateGlowPosition();
+
+                int idx = angleToIndex(glowAngle);
+                if (idx != selectedIndex) {
+                    applySelection(idx, false);
+                }
+                // ★ 通知外部：页面跟手
+                if (listener != null) {
+                    listener.onProgressChanged(angleToProgress(glowAngle));
+                }
+                invalidate();
+                break;
+            }
+
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL: {
+                isDragging = false;
+                globalTracking = false;
+                snapToNearest();
+                break;
+            }
+        }
+    }
+
+
 }
