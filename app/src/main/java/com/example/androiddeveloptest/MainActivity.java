@@ -10,7 +10,6 @@ import androidx.core.view.WindowInsetsCompat;
 
 public class MainActivity extends AppCompatActivity {
     private CurvedNavBar navBar;
-    private int testIndex = 0;
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -25,10 +24,6 @@ public class MainActivity extends AppCompatActivity {
 
         // onCreate 里加
         navBar = findViewById(R.id.curvedNavBar);
-        navBar.setOnClickListener(v -> {
-            testIndex = (testIndex + 1) % 5;
-            navBar.animateGlowTo(testIndex);
-        });
     }
 
 }
