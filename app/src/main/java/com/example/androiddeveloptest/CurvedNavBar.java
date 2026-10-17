@@ -12,6 +12,7 @@ import android.graphics.PorterDuffColorFilter;
 import android.graphics.RadialGradient;
 import android.graphics.RectF;
 import android.graphics.Shader;
+import android.os.Handler;
 import android.os.Looper;
 import android.util.AttributeSet;
 import android.view.HapticFeedbackConstants;
@@ -19,86 +20,134 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.animation.DecelerateInterpolator;
 import android.view.animation.OvershootInterpolator;
-import android.os.Handler;
 
 import androidx.annotation.Nullable;
 
-
+/**
+ * 碗形弧线底部导航栏。
+ *
+ * <p>结构说明：
+ * <ul>
+ *   <li>弧带：用 STROKE + ROUND cap 画一条圆弧，天然得到两头圆的效果</li>
+ *   <li>导航项：沿弧线等角度排布，每个项含图标与文字，整体垂直于弧线并做 180° 回正</li>
+ *   <li>光晕：径向渐变，裁剪到弧带形状内部，只在弧带内可见</li>
+ *   <li>交互：点击切换（带缩放反馈）、长按拖动（Δx 映射为 Δθ）、松手吸附</li>
+ * </ul>
+ *
+ * <p>坐标系约定：0° 指向右（3 点钟），90° 指向下（6 点钟），顺时针为正。
+ */
 public class CurvedNavBar extends View {
 
-    // ===== 画笔与路径（提成成员变量，不要放 onDraw 里 new）=====
+    // ==================================================================
+    // 常量
+    // ==================================================================
+
+    /** 弧带张角（度）。来自原图的像素扫描结果。 */
+    private static final float SWEEP = 67.8f;
+
+    /** 导航项数量。 */
+    private static final int ITEM_COUNT = 5;
+
+    /** 长按判定阈值（毫秒）。 */
+    private static final long LONG_PRESS_MS = 400;
+
+    /** 选中项颜色（明黄）。 */
+    private static final int COLOR_SELECTED = 0xFFFFC107;
+
+    /** 未选中项颜色（白）。 */
+    private static final int COLOR_UNSELECTED = 0xFFFFFFFF;
+
+    /** 弧带底色（深蓝）。 */
+    private static final int COLOR_ARC = 0xFF16506B;
+
+    // ---- 几何比例（相对弦长，均来自原图像素扫描）----
+    private static final float RATIO_CHORD = 0.77f;      // 弦长 / 控件宽度
+    private static final float RATIO_RADIUS = 0.896f;    // 半径 / 弦长
+    private static final float RATIO_THICKNESS = 0.183f; // 厚度 / 弦长
+
+    // ---- 视觉比例（相对弧带厚度）----
+    private static final float RATIO_ICON_SIZE = 0.63f;  // 图标边长 / 厚度
+    private static final float RATIO_TEXT_SIZE = 0.16f;  // 文字大小 / 厚度
+    private static final float RATIO_TEXT_GAP = 0.14f;   // 文字间距 / 厚度
+    private static final float RATIO_VERTICAL = -0.08f;  // 垂直微调 / 厚度（负值上移）
+    private static final float RATIO_GLOW = 0.6f;        // 光晕半径 / 基准距离
+
+    // ---- 动画参数 ----
+    private static final long GLOW_DURATION_MS = 300;
+    private static final long PRESS_DOWN_MS = 120;
+    private static final long PRESS_UP_MS = 200;
+    private static final float PRESS_SCALE_MIN = 0.85f;
+    private static final float PRESS_OVERSHOOT = 1.3f;
+
+    // ==================================================================
+    // 画笔与路径（复用，避免在 onDraw 里创建对象）
+    // ==================================================================
+
     private final Paint arcPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Path arcPath = new Path();
-    private final RectF arcRect = new RectF();
-
-    // ===== 几何参数，在 onSizeChanged 里算 =====
-    private float cx, cy;        // 圆心
-    private float radius;        // 中心线半径
-    private float thickness;     // 弧带厚度
-    private float startAngle;    // 起始角
-    private static final float SWEEP = 67.8f;   // 张角（扫描实测值）
-
-    // ===== 导航项 =====
-    private static final int ITEM_COUNT = 5;     // 5 个图标
-
-    // ===== 选中状态 =====
-    private int selectedIndex = 2;              // 默认选中中间（index 2）
-
-    // ===== 光晕 =====
     private final Paint glowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private float glowRadius;                   // 光晕半径（常量，由中间图标算出）
-    private float glowX, glowY;                 // 光晕中心（可变）
-    private float glowAngle;                    // 光晕在弧线上的角度（动画/拖动用）
-
-    private static final int COLOR_SELECTED   = 0xFFFFC107;  // 琥珀黄
-    private static final int COLOR_UNSELECTED = 0xFFFFFFFF;  // 白
-
-    // 颜色滤镜（预先创建，避免 onDraw 里反复 new）
-    private PorterDuffColorFilter filterSelected;
-    private PorterDuffColorFilter filterUnselected;
-
-    // 整体垂直微调（负值上移，正值下移），单位 px
-    private float verticalAdjust;                       // 只声明，不给初值
-
-    private final Path arcClipPath = new Path();   // 用于裁剪的"实心"弧带
-
-    // ===== 导航项 =====
-    private final NavItem[] items = new NavItem[ITEM_COUNT];
-
-    // 图标与文字的画笔
     private final Paint iconPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
+    private final Path arcPath = new Path();
+    private final Path arcClipPath = new Path();
+    private final RectF arcRect = new RectF();
+
+    private PorterDuffColorFilter filterSelected;
+    private PorterDuffColorFilter filterUnselected;
+
+    // ==================================================================
+    // 几何参数（在 onSizeChanged 中计算）
+    // ==================================================================
+
+    /** 圆心坐标。注意 cy 可能为负，即圆心在控件上方之外。 */
+    private float cx, cy;
+    /** 弧带中心线的半径。 */
+    private float radius;
+    /** 弧带厚度（即 strokeWidth）。 */
+    private float thickness;
+    /** 弧带起始角。 */
+    private float startAngle;
+
+    /** 图标+文字整体沿 y 方向的微调量（负值上移）。 */
+    private float verticalAdjust;
+
+    // ==================================================================
+    // 光晕状态
+    // ==================================================================
+
+    private float glowRadius;
+    private float glowX, glowY;
+    /** 光晕当前所在角度，是动画与拖动共同驱动的唯一状态量。 */
+    private float glowAngle;
     private ValueAnimator glowAnimator;
 
-    // ===== 按压反馈 =====
-    private int pressedIndex = -1;              // 当前按下的 index（-1 = 无）
-    private float pressScale = 1f;              // 缩放系数
-    private ValueAnimator scaleAnimator;        // 缩放动画
+    // ==================================================================
+    // 导航项与选中状态
+    // ==================================================================
 
-    // ===== 长按拖动 =====
-    private static final long LONG_PRESS_MS = 400;   // 长按阈值
-    private boolean isDragging = false;              // 是否处于拖动模式
-    private float dragStartX;                        // 按下时的 x
-    private float dragStartAngle;                    // 按下时的光晕角度
+    private final NavItem[] items = new NavItem[ITEM_COUNT];
+    private int selectedIndex = ITEM_COUNT / 2;
+
+    // ==================================================================
+    // 按压反馈
+    // ==================================================================
+
+    private int pressedIndex = -1;
+    private float pressScale = 1f;
+    private ValueAnimator scaleAnimator;
+
+    // ==================================================================
+    // 长按拖动
+    // ==================================================================
+
+    private boolean isDragging = false;
+    private float dragStartX;
+    private float dragStartAngle;
+    private float lastDownX;
+    /** Activity 是否已通过 onGlobalDown 通知按下。 */
+    private boolean globalTracking = false;
+
     private final Handler handler = new Handler(Looper.getMainLooper());
-
-    /**
-     * 选中项变化回调
-     */
-    public interface OnItemSelectedListener {
-        /** 选中项确定变化（点击后 / 拖动进入新区间） */
-        void onItemSelected(int index);
-
-        /** 拖动中的连续进度（0 ~ ITEM_COUNT-1），用于页面跟手 */
-        void onProgressChanged(float progress);
-    }
-
-    private OnItemSelectedListener listener;
-
-    public void setOnItemSelectedListener(OnItemSelectedListener l) {
-        this.listener = l;
-    }
 
     private final Runnable longPressRunnable = new Runnable() {
         @Override
@@ -107,7 +156,7 @@ public class CurvedNavBar extends View {
             dragStartX = lastDownX;
             dragStartAngle = glowAngle;
 
-            // 直接复位，不用动画（长按瞬间恢复，避免"先缩再弹"的突兀）
+            // 长按成立时立刻退出按压态，避免拖动过程中图标一直缩着
             if (scaleAnimator != null && scaleAnimator.isRunning()) {
                 scaleAnimator.cancel();
             }
@@ -116,79 +165,46 @@ public class CurvedNavBar extends View {
             invalidate();
 
             performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
-            invalidate();
-
-            performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
         }
     };
 
-    private float lastDownX;                         // 记录按下位置（给 runnable 用）
+    // ==================================================================
+    // 对外回调
+    // ==================================================================
 
     /**
-     * 单个导航项：图标 + 文字
-     * 封装了它自己的位置、旋转、绘制逻辑
+     * 导航栏交互回调。
      */
-    private static class NavItem {
-        float angle;                    // 在弧线上的角度
-        float centerX, centerY;         // 图标中心坐标
-        int iconRes;                    // 图标资源 id
-        String label;                   // 文字
+    public interface OnItemSelectedListener {
 
-        Bitmap icon;                    // 加载后的位图
-        final RectF iconRect = new RectF();   // 图标绘制矩形（相对中心，未旋转）
-        final RectF tmpRect = new RectF();    // 绘制时复用
-
-        boolean selected;               // 是否选中
-
-
-
-        NavItem(int iconRes, String label) {
-            this.iconRes = iconRes;
-            this.label = label;
-        }
         /**
-         * 绘制这个导航项（图标 + 文字）
+         * 选中项确定变化后触发（点击、拖动松手吸附）。
          *
-         * @param canvas    画布
-         * @param iconPaint 图标画笔（已设置好 colorFilter）
-         * @param textPaint 文字画笔
-         * @param textGap   文字与图标之间的间距
+         * @param index 目标导航项下标
          */
-        void draw(Canvas canvas, Paint iconPaint, Paint textPaint,
-                  float textGap, float yOffset, float scale) {
-            if (icon == null) return;
+        void onItemSelected(int index);
 
-            // ===== 1. 计算旋转角 =====
-            float rotation = angle + 90f;      // 垂直于弧线
-
-            // ===== 2. 回正纠正：旋转角落在 (90, 270) 内时多转 180° =====
-            float r = rotation % 360f;
-            if (r < 0) r += 360f;
-            boolean flipped = (r > 90f && r < 270f);
-            float finalRotate = flipped ? rotation + 180f : rotation;
-
-            // ===== 3. 变换画布：平移 → 旋转 → 缩放 =====
-            canvas.save();
-            canvas.translate(centerX, centerY + yOffset);
-            canvas.rotate(finalRotate);
-            canvas.scale(scale, scale);        // ★ 图标和文字一起缩放
-
-            // ===== 4. 画图标（居中在原点）=====
-            tmpRect.set(iconRect);
-            canvas.drawBitmap(icon, null, tmpRect, iconPaint);
-
-            // ===== 5. 画文字（在图标下方）=====
-            if (label != null && !label.isEmpty()) {
-                float textY = iconRect.bottom + textGap;
-                canvas.drawText(label, 0f, textY, textPaint);
-            }
-
-            canvas.restore();
-        }
+        /**
+         * 拖动过程中的连续进度，用于让页面跟手平移。
+         *
+         * @param progress 取值 0 ~ ITEM_COUNT-1，0 对应最左页
+         */
+        void onProgressChanged(float progress);
     }
 
+    private OnItemSelectedListener listener;
 
-    // ===== 构造方法：三个都要写 =====
+    /**
+     * 设置交互回调。
+     */
+    public void setOnItemSelectedListener(OnItemSelectedListener l) {
+        this.listener = l;
+    }
+
+    // ==================================================================
+    // 构造
+    // ==================================================================
+
     public CurvedNavBar(Context context) {
         this(context, null);
     }
@@ -204,124 +220,75 @@ public class CurvedNavBar extends View {
 
     private void init() {
         arcPaint.setStyle(Paint.Style.STROKE);
-        arcPaint.setColor(0xFF16506B);
+        arcPaint.setColor(COLOR_ARC);
         arcPaint.setStrokeCap(Paint.Cap.ROUND);
         arcPaint.setStrokeJoin(Paint.Join.ROUND);
 
-        // 颜色滤镜：SRC_IN 保留透明度，只换颜色
+        // PorterDuff.Mode.SRC_IN：保留图标本身的透明度，只替换颜色
         filterSelected = new PorterDuffColorFilter(COLOR_SELECTED, PorterDuff.Mode.SRC_IN);
         filterUnselected = new PorterDuffColorFilter(COLOR_UNSELECTED, PorterDuff.Mode.SRC_IN);
 
-        // 文字画笔
         textPaint.setColor(COLOR_UNSELECTED);
-        textPaint.setTextAlign(Paint.Align.CENTER);   // 以中心对齐绘制
-        textPaint.setTextSize(30f);                    // 先用固定值，后面按尺寸调整
+        textPaint.setTextAlign(Paint.Align.CENTER);
 
-        // 创建 5 个导航项（顺序 = 从左到右）
-        items[0] = new NavItem(R.drawable.ic_tools,      "工具");
+        // 下标顺序即弧线上从左到右的顺序
+        items[0] = new NavItem(R.drawable.ic_tools, "工具");
         items[1] = new NavItem(R.drawable.ic_statistics, "统计");
-        items[2] = new NavItem(R.drawable.ic_home,       "主页");
-        items[3] = new NavItem(R.drawable.ic_bill,       "账单");
-        items[4] = new NavItem(R.drawable.ic_person,     "我的");
+        items[2] = new NavItem(R.drawable.ic_home, "主页");
+        items[3] = new NavItem(R.drawable.ic_bill, "账单");
+        items[4] = new NavItem(R.drawable.ic_person, "我的");
 
-        // 加载图标
         for (NavItem item : items) {
             item.icon = BitmapFactory.decodeResource(getResources(), item.iconRes);
         }
     }
 
-    /**
-     * 把一个角度转换成弧线上的坐标
-     * 这是"极坐标 → 直角坐标"的换算，图标和光晕都用它
-     *
-     * @param angleDeg 角度（度），0°=右，90°=下，顺时针为正
-     * @return 长度为 2 的数组：[x, y]
-     */
-    private float[] pointOnArc(float angleDeg) {
-        double rad = Math.toRadians(angleDeg);
-        float x = cx + radius * (float) Math.cos(rad);
-        float y = cy + radius * (float) Math.sin(rad);
-        return new float[]{x, y};
-    }
-
-    private void updateGlowPosition() {
-        float[] p = pointOnArc(glowAngle);
-        glowX = p[0];
-        glowY = p[1];
-    }
-
-    /**
-     * 把光晕动画移动到第 index 个图标
-     */
-    public void animateGlowTo(int index) {
-        if (index < 0 || index >= ITEM_COUNT) return;
-
-        // 取消正在跑的动画，防止连续点击时打架
-        if (glowAnimator != null && glowAnimator.isRunning()) {
-            glowAnimator.cancel();
-        }
-
-        float from = glowAngle;
-        float to = items[index].angle;
-
-        for (int i = 0; i < ITEM_COUNT; i++) {
-            items[i].selected = (i == index);
-        }
-
-        selectedIndex = index;
-
-        glowAnimator = ValueAnimator.ofFloat(from, to);
-
-        glowAnimator.setDuration(300);
-        glowAnimator.setInterpolator(new DecelerateInterpolator());
-        glowAnimator.addUpdateListener(animation -> {
-            glowAngle = (float) animation.getAnimatedValue();
-            updateGlowPosition();
-            invalidate();
-        });
-        glowAnimator.start();
-
-        // ★ 通知外部：页面滑到目标页（吸附时也需要归位）
-        if (listener != null) {
-            listener.onItemSelected(index);
-        }
-    }
+    // ==================================================================
+    // 测量与布局
+    // ==================================================================
 
     @Override
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
 
-        // ==================== 1. 弧带几何 ====================
-        // 左右间距：弦长 = 宽度的 77%
-        float chord = w * 0.77f;
+        computeArcGeometry(w, h);
+        buildArcPaths();
+        computeItemLayout(w, h);
+        computeGlow(w);
+    }
 
-        // 半径：控制弯度（R/弦长 = 0.896，来自原图像素扫描）
-        radius = chord * 0.896f;
-
-        // 厚度：弧带粗细（厚度/弦长 = 0.183）
-        thickness = chord * 0.183f;
+    /**
+     * 计算圆心、半径、厚度等基础几何量。
+     */
+    private void computeArcGeometry(int w, int h) {
+        float chord = w * RATIO_CHORD;
+        radius = chord * RATIO_RADIUS;
+        thickness = chord * RATIO_THICKNESS;
         arcPaint.setStrokeWidth(thickness);
 
-        // 圆心水平居中
         cx = w / 2f;
 
-
-        // 圆心纵坐标：由"中心线最低点"倒推，保证弧带底部不超出控件
+        // 由"中心线最低点"反推圆心，保证弧带底部不超出控件
         float bottomMargin = h * 0.16f;
         float lowestCenter = h - bottomMargin - thickness / 2f;
         cy = lowestCenter - radius;
 
-        // 弧带的外接矩形（定义这个圆）
+        startAngle = 90f - SWEEP / 2f;
+    }
+
+    /**
+     * 构建两条路径：
+     * <ul>
+     *   <li>arcPath —— 中心线的圆弧，用于描边绘制</li>
+     *   <li>arcClipPath —— 带厚度的实心弧带，用于裁剪光晕</li>
+     * </ul>
+     */
+    private void buildArcPaths() {
         arcRect.set(cx - radius, cy - radius, cx + radius, cy + radius);
 
-        // 起始角：让弧对称于竖直中线（90° 是正下方）
-        startAngle = 90f - SWEEP / 2f;
-
-        // 重建描边路径
         arcPath.reset();
         arcPath.addArc(arcRect, startAngle, SWEEP);
 
-        // ==================== 2. 裁剪用的"实心弧带"路径 ====================
         float rOuter = radius + thickness / 2f;
         float rInner = radius - thickness / 2f;
 
@@ -330,10 +297,10 @@ public class CurvedNavBar extends View {
 
         arcClipPath.reset();
 
-        // ① 外弧
+        // ① 外弧：起点 -> 终点
         arcClipPath.addArc(outerRect, startAngle, SWEEP);
 
-        // ② 右端帽（从外弧终点扫 180° 到内弧起点）
+        // ② 右端帽：从外弧终点沿径向扫 180° 到内弧起点
         float endRad = (float) Math.toRadians(startAngle + SWEEP);
         float endCx = cx + radius * (float) Math.cos(endRad);
         float endCy = cy + radius * (float) Math.sin(endRad);
@@ -342,10 +309,10 @@ public class CurvedNavBar extends View {
                         endCx + thickness / 2f, endCy + thickness / 2f),
                 startAngle + SWEEP, 180f, false);
 
-        // ③ 内弧（反向扫回）
+        // ③ 内弧：终点 -> 起点（反向）
         arcClipPath.addArc(innerRect, startAngle + SWEEP, -SWEEP);
 
-        // ④ 左端帽（从内侧起，扫到外侧）
+        // ④ 左端帽：从内侧起扫 180° 回到外弧起点
         float startRad = (float) Math.toRadians(startAngle);
         float startCx = cx + radius * (float) Math.cos(startRad);
         float startCy = cy + radius * (float) Math.sin(startRad);
@@ -355,84 +322,134 @@ public class CurvedNavBar extends View {
                 startAngle + 180f, 180f, false);
 
         arcClipPath.close();
+    }
 
-        // ==================== 3. 图标分布区间 ====================
-        // 端帽占据的角度
-        float capAngle = (float) Math.toDegrees(
-                Math.atan((thickness / 2f) / radius));
-
-        // 留出 1.2 倍端帽角度作为边距，避免图标压到端帽上
+    /**
+     * 计算各导航项的角度与坐标。
+     */
+    private void computeItemLayout(int w, int h) {
+        // 端帽占据的角度，用它留出边距，避免首尾图标压在端帽上
+        float capAngle = (float) Math.toDegrees(Math.atan((thickness / 2f) / radius));
         float spreadSweep = SWEEP - capAngle * 1.2f;
         float spreadStart = 90f - spreadSweep / 2f;
 
-        // ==================== 4. 逐个更新导航项 ====================
-        float iconSize = thickness * 0.63f;      // 图标边长
-        float textSize = thickness * 0.16f;      // 文字大小
-        textPaint.setTextSize(textSize);
-
-        // 图标矩形半边长（相对中心，负数表示向左/上）
+        float iconSize = thickness * RATIO_ICON_SIZE;
+        textPaint.setTextSize(thickness * RATIO_TEXT_SIZE);
         float half = iconSize / 2f;
 
         for (int i = 0; i < ITEM_COUNT; i++) {
             NavItem item = items[i];
 
-            // 角度：5 个等分点（i/(n-1) 让首尾正好在区间两端）
-            float a = spreadStart + spreadSweep * (ITEM_COUNT - 1 - i) / (ITEM_COUNT - 1);
-            item.angle = a;
+            // 注意下标反序：cos 在钝角区为负，角度越大 x 越小（越靠左）
+            float angle = spreadStart + spreadSweep * (ITEM_COUNT - 1 - i) / (ITEM_COUNT - 1);
+            item.angle = angle;
 
-            // 坐标
-            float[] p = pointOnArc(a);
+            float[] p = pointOnArc(angle);
             item.centerX = p[0];
             item.centerY = p[1];
 
-            // 图标矩形：以 item 中心为原点
             item.iconRect.set(-half, -half, half, half);
-
-            // 选中状态
             item.selected = (i == selectedIndex);
         }
 
-        // ==================== 5. 光晕 ====================
-        // 半径：中间图标中心 → 控件顶部中点 (w/2, 0)
-        int mid = ITEM_COUNT / 2;
-        float dx0 = items[mid].centerX - w / 2f;
-        float dy0 = items[mid].centerY;
-        glowRadius = (float) Math.hypot(dx0, dy0) * 0.6f;
-
-        // 光晕中心初始在中间图标上
-        glowAngle = items[mid].angle;
-        updateGlowPosition();
-
-        verticalAdjust = -thickness * 0.08f;   // 负值 = 上移
+        verticalAdjust = thickness * RATIO_VERTICAL;
     }
 
+    /**
+     * 计算光晕半径。基准为"中间图标中心到控件顶部中点"的距离。
+     */
+    private void computeGlow(int w) {
+        int mid = ITEM_COUNT / 2;
+        float dx = items[mid].centerX - w / 2f;
+        float dy = items[mid].centerY;
+        glowRadius = (float) Math.hypot(dx, dy) * RATIO_GLOW;
+
+        glowAngle = items[mid].angle;
+        updateGlowPosition();
+    }
+
+    // ==================================================================
+    // 绘制
+    // ==================================================================
 
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
 
-        // 1. 弧带（最底层）
+        // 1. 弧带
         canvas.drawPath(arcPath, arcPaint);
 
-        // 2. 光晕（在弧带之上，图标之下）
+        // 2. 光晕（在弧带之上、图标之下）
         drawGlow(canvas);
 
-        // 3. 所有导航项（图标 + 文字，各自处理旋转）
-        float textGap = thickness * 0.14f;
+        // 3. 导航项
+        drawItems(canvas);
+    }
+
+    private void drawGlow(Canvas canvas) {
+        RadialGradient shader = new RadialGradient(
+                glowX, glowY, glowRadius,
+                new int[]{
+                        0xFFFFF59D,   // 中心：淡黄
+                        0x8FFFEB3B,   // 中段：明黄
+                        0x00FFEB3B    // 边缘：透明
+                },
+                new float[]{0f, 0.35f, 1f},
+                Shader.TileMode.CLAMP);
+        glowPaint.setShader(shader);
+
+        // 裁剪到弧带内部，否则光晕会溢出到弧带外的空白区域
+        canvas.save();
+        canvas.clipPath(arcClipPath);
+        canvas.drawCircle(glowX, glowY, glowRadius, glowPaint);
+        canvas.restore();
+    }
+
+    private void drawItems(Canvas canvas) {
+        float textGap = thickness * RATIO_TEXT_GAP;
+
         for (int i = 0; i < ITEM_COUNT; i++) {
             NavItem item = items[i];
+
             iconPaint.setColorFilter(item.selected ? filterSelected : filterUnselected);
             textPaint.setColor(item.selected ? COLOR_SELECTED : COLOR_UNSELECTED);
 
-            // 只有被按下的那个才缩放
             float scale = (i == pressedIndex) ? pressScale : 1f;
             item.draw(canvas, iconPaint, textPaint, textGap, verticalAdjust, scale);
         }
+
         iconPaint.setColorFilter(null);
     }
 
+    // ==================================================================
+    // 几何换算
+    // ==================================================================
+
     /**
-     * 判断某个角度落在第几个导航项（最近邻）
+     * 极坐标转直角坐标。
+     *
+     * @param angleDeg 角度（度）
+     * @return 长度为 2 的数组：[x, y]
+     */
+    private float[] pointOnArc(float angleDeg) {
+        double rad = Math.toRadians(angleDeg);
+        return new float[]{
+                cx + radius * (float) Math.cos(rad),
+                cy + radius * (float) Math.sin(rad)
+        };
+    }
+
+    /**
+     * 根据 glowAngle 重算光晕中心坐标。
+     */
+    private void updateGlowPosition() {
+        float[] p = pointOnArc(glowAngle);
+        glowX = p[0];
+        glowY = p[1];
+    }
+
+    /**
+     * 找离给定角度最近的导航项下标。
      */
     private int angleToIndex(float angleDeg) {
         int best = 0;
@@ -448,166 +465,68 @@ public class CurvedNavBar extends View {
     }
 
     /**
-     * 把光晕角度换算成页面进度（0 ~ ITEM_COUNT-1）
+     * 把光晕角度换算成页面进度。
      *
-     * 注意：items[0] 角度最大（最左），items[4] 角度最小（最右）
-     * 而 progress 0 = 最左页，所以要做反向映射
+     * <p>items[0] 角度最大（最左）、items[ITEM_COUNT-1] 角度最小（最右），
+     * 而 progress 0 对应最左页，因此需要反向映射。
+     *
+     * @return 0 ~ ITEM_COUNT-1 的连续值
      */
     private float angleToProgress(float angleDeg) {
-        float maxAngle = items[0].angle;                 // 最左（角度最大）
-        float minAngle = items[ITEM_COUNT - 1].angle;    // 最右（角度最小）
+        float maxAngle = items[0].angle;
+        float minAngle = items[ITEM_COUNT - 1].angle;
 
-        if (maxAngle - minAngle <= 0.001f) return 0f;    // 防除零
+        float span = maxAngle - minAngle;
+        if (span <= 0.001f) return 0f;
 
-        // 归一化到 [0, 1]
-        float t = (maxAngle - angleDeg) / (maxAngle - minAngle);
+        float t = (maxAngle - angleDeg) / span;
         t = Math.max(0f, Math.min(1f, t));
-
-        // 映射到 [0, ITEM_COUNT-1]
         return t * (ITEM_COUNT - 1);
     }
 
+    // ==================================================================
+    // 选中与动画
+    // ==================================================================
+
     /**
-     * 按下/回弹的缩放动画
-     *
-     * @param down true = 缩小（按下），false = 弹回（松手）
+     * 把光晕动画移动到指定导航项，并通知外部切页。
      */
-    private void animatePress(boolean down) {
-        if (scaleAnimator != null && scaleAnimator.isRunning()) {
-            scaleAnimator.cancel();
+    public void animateGlowTo(int index) {
+        if (index < 0 || index >= ITEM_COUNT) return;
+
+        if (glowAnimator != null && glowAnimator.isRunning()) {
+            glowAnimator.cancel();
         }
 
-        float from = pressScale;
-        float to = down ? 0.85f : 1f;
+        float from = glowAngle;
+        float to = items[index].angle;
 
-        scaleAnimator = ValueAnimator.ofFloat(from, to);
-        scaleAnimator.setDuration(down ? 120 : 200);
-        scaleAnimator.setInterpolator(down
-                ? new DecelerateInterpolator()
-                : new OvershootInterpolator(1.3f));
+        for (int i = 0; i < ITEM_COUNT; i++) {
+            items[i].selected = (i == index);
+        }
+        selectedIndex = index;
 
-        scaleAnimator.addUpdateListener(a -> {
-            pressScale = (float) a.getAnimatedValue();
+        glowAnimator = ValueAnimator.ofFloat(from, to);
+        glowAnimator.setDuration(GLOW_DURATION_MS);
+        glowAnimator.setInterpolator(new DecelerateInterpolator());
+        glowAnimator.addUpdateListener(animation -> {
+            glowAngle = (float) animation.getAnimatedValue();
+            updateGlowPosition();
             invalidate();
         });
-        scaleAnimator.start();
-    }
-    private void drawGlow(Canvas canvas) {
-        RadialGradient shader = new RadialGradient(
-                glowX, glowY, glowRadius,
-                new int[]{
-                        0xFFFFF59D,   // 中心：淡黄
-                        0x8FFFEB3B,   // 中段：明黄，56% 不透明
-                        0x00FFEB3B    // 边缘：全透明
-                },
-                new float[]{0f, 0.35f, 1f},
-                Shader.TileMode.CLAMP
-        );
-        glowPaint.setShader(shader);
+        glowAnimator.start();
 
-        // ★ 裁剪到弧带形状内部：save → clipPath → draw → restore
-        canvas.save();
-        canvas.clipPath(arcClipPath);
-        canvas.drawCircle(glowX, glowY, glowRadius, glowPaint);
-        canvas.restore();       // 少了这行，图标也会被裁掉
-    }
-
-    @Override
-    public boolean onTouchEvent(MotionEvent event) {
-        switch (event.getActionMasked()) {
-
-            case MotionEvent.ACTION_DOWN: {
-                lastDownX = event.getX();
-
-                float dx = event.getX() - cx;
-                float dy = event.getY() - cy;
-                float r = (float) Math.hypot(dx, dy);
-                float halfThick = thickness / 2f;
-
-                // 点在弧带外 → 不消费，但长按仍可能生效（后面通过 Activity 转发）
-                if (r < radius - halfThick || r > radius + halfThick) {
-                    return false;
-                }
-
-                float angle = (float) Math.toDegrees(Math.atan2(dy, dx));
-                pressedIndex = angleToIndex(angle);
-
-                animatePress(true);                          // 缩小反馈
-                handler.postDelayed(longPressRunnable, LONG_PRESS_MS);   // 启动长按计时
-                return true;
-            }
-
-            case MotionEvent.ACTION_MOVE: {
-                if (!isDragging) return true;
-
-                // Δx → Δθ
-                float dx = event.getX() - dragStartX;
-                float deltaDeg = (float) Math.toDegrees( -dx / radius);
-                float newAngle = dragStartAngle + deltaDeg;
-
-                // 钳制在图标分布区间内
-                float minAngle = items[ITEM_COUNT - 1].angle;   // 角度最小 = 最右
-                float maxAngle = items[0].angle;                // 角度最大 = 最左
-                newAngle = Math.max(minAngle, Math.min(maxAngle, newAngle));
-
-                glowAngle = newAngle;
-                updateGlowPosition();
-
-                // 判定当前落在哪个 item，变了就切
-                int idx = angleToIndex(glowAngle);
-                if (idx != selectedIndex) {
-                    applySelection(idx, false);
-                }
-                invalidate();
-                return true;
-            }
-
-            case MotionEvent.ACTION_UP: {
-                handler.removeCallbacks(longPressRunnable);
-
-                if (isDragging) {
-                    // ★ 拖动结束：吸附到最近的图标
-                    isDragging = false;
-                    snapToNearest();
-                } else if (pressedIndex >= 0) {
-                    animatePress(false);
-                    animateGlowTo(pressedIndex);      // ★ 无条件调用
-                }
-                pressedIndex = -1;
-                return true;
-            }
-
-            case MotionEvent.ACTION_CANCEL: {
-                handler.removeCallbacks(longPressRunnable);
-                boolean wasDragging = isDragging;
-                isDragging = false;
-                if (wasDragging) {
-                    snapToNearest();          // ★ 中途取消也吸附
-                } else {
-                    animatePress(false);
-                }
-                pressedIndex = -1;
-                return true;
-            }
+        // 吸附时 index 可能没变，但页面仍需归位，所以无条件通知
+        if (listener != null) {
+            listener.onItemSelected(index);
         }
-        return super.onTouchEvent(event);
     }
 
     /**
-     * 拖动松手时，吸附到离光晕最近的图标
+     * 立即选中（无动画）。拖动过程中使用，页面位置由 onProgressChanged 驱动。
+     *
+     * @param notify 是否通知外部切页。拖动时应传 false，避免和跟手动画冲突。
      */
-    private void snapToNearest() {
-        int nearest = angleToIndex(glowAngle);
-
-        // 复用点击的动画：滑过去 + 更新选中态 + 触发回调
-        animateGlowTo(nearest);
-    }
-
-    /**
-     * 立即选中某个 item（无动画）
-     * 拖动时用这个，因为光晕位置已经由手指决定了
-     */
-
     private void applySelection(int index, boolean notify) {
         if (index < 0 || index >= ITEM_COUNT) return;
 
@@ -621,11 +540,156 @@ public class CurvedNavBar extends View {
         }
     }
 
-    // ===== 全局触摸（由 Activity 转发）=====
-    private boolean globalTracking = false;   // Activity 是否已通知按下
+    /**
+     * 吸附到离光晕最近的导航项。
+     */
+    private void snapToNearest() {
+        animateGlowTo(angleToIndex(glowAngle));
+    }
 
     /**
-     * Activity 在 ACTION_DOWN 时调用，开始监听长按
+     * 按下 / 回弹的缩放动画。
+     *
+     * @param down true = 缩小（按下），false = 弹回（松手）
+     */
+    private void animatePress(boolean down) {
+        if (scaleAnimator != null && scaleAnimator.isRunning()) {
+            scaleAnimator.cancel();
+        }
+
+        float from = pressScale;
+        float to = down ? PRESS_SCALE_MIN : 1f;
+
+        scaleAnimator = ValueAnimator.ofFloat(from, to);
+        scaleAnimator.setDuration(down ? PRESS_DOWN_MS : PRESS_UP_MS);
+        scaleAnimator.setInterpolator(down
+                ? new DecelerateInterpolator()
+                : new OvershootInterpolator(PRESS_OVERSHOOT));
+
+        scaleAnimator.addUpdateListener(a -> {
+            pressScale = (float) a.getAnimatedValue();
+            invalidate();
+        });
+        scaleAnimator.start();
+    }
+
+    // ==================================================================
+    // 触摸处理：控件内
+    // ==================================================================
+
+    @Override
+    public boolean onTouchEvent(MotionEvent event) {
+        switch (event.getActionMasked()) {
+
+            case MotionEvent.ACTION_DOWN:
+                return handleTouchDown(event);
+
+            case MotionEvent.ACTION_MOVE:
+                if (!isDragging) return true;
+                handleDragEvent(event);
+                return true;
+
+            case MotionEvent.ACTION_UP:
+                handler.removeCallbacks(longPressRunnable);
+                if (isDragging) {
+                    handleDragEvent(event);
+                } else if (pressedIndex >= 0) {
+                    animatePress(false);
+                    animateGlowTo(pressedIndex);
+                }
+                pressedIndex = -1;
+                return true;
+
+            case MotionEvent.ACTION_CANCEL:
+                handler.removeCallbacks(longPressRunnable);
+                if (isDragging) {
+                    handleDragEvent(event);
+                } else {
+                    animatePress(false);
+                }
+                pressedIndex = -1;
+                return true;
+        }
+        return super.onTouchEvent(event);
+    }
+
+    private boolean handleTouchDown(MotionEvent event) {
+        lastDownX = event.getX();
+
+        float dx = event.getX() - cx;
+        float dy = event.getY() - cy;
+        float r = (float) Math.hypot(dx, dy);
+        float halfThick = thickness / 2f;
+
+        // 点在弧带外：不消费事件，交给下层的页面处理
+        if (r < radius - halfThick || r > radius + halfThick) {
+            return false;
+        }
+
+        float angle = (float) Math.toDegrees(Math.atan2(dy, dx));
+        pressedIndex = angleToIndex(angle);
+
+        animatePress(true);
+        handler.postDelayed(longPressRunnable, LONG_PRESS_MS);
+        return true;
+    }
+
+    /**
+     * 处理拖动中的事件。控件内触摸与 Activity 转发的全局触摸共用此逻辑。
+     */
+    private void handleDragEvent(MotionEvent ev) {
+        switch (ev.getActionMasked()) {
+
+            case MotionEvent.ACTION_MOVE:
+                updateDragAngle(ev.getX());
+                break;
+
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL:
+                isDragging = false;
+                globalTracking = false;
+                snapToNearest();
+                break;
+        }
+    }
+
+    /**
+     * 根据手指横坐标更新光晕角度。
+     *
+     * <p>换算依据：同半径圆弧的弧长正比于角度，故 Δθ = Δx / R。
+     * 角度增大对应向左（cos 在钝角区为负），因此 Δx 需取负号。
+     */
+    private void updateDragAngle(float fingerX) {
+        float dx = fingerX - dragStartX;
+        float deltaDeg = (float) Math.toDegrees(-dx / radius);
+        float newAngle = dragStartAngle + deltaDeg;
+
+        float minAngle = items[ITEM_COUNT - 1].angle;
+        float maxAngle = items[0].angle;
+        newAngle = Math.max(minAngle, Math.min(maxAngle, newAngle));
+
+        glowAngle = newAngle;
+        updateGlowPosition();
+
+        // 变色但不触发切页动画，页面由 onProgressChanged 跟手
+        int idx = angleToIndex(glowAngle);
+        if (idx != selectedIndex) {
+            applySelection(idx, false);
+        }
+
+        if (listener != null) {
+            listener.onProgressChanged(angleToProgress(glowAngle));
+        }
+
+        invalidate();
+    }
+
+    // ==================================================================
+    // 触摸处理：全局（由 Activity 转发）
+    // ==================================================================
+
+    /**
+     * Activity 在 ACTION_DOWN 时调用，开始监听长按。
      */
     public void onGlobalDown(float x, float y) {
         lastDownX = x;
@@ -637,77 +701,103 @@ public class CurvedNavBar extends View {
     }
 
     /**
-     * Activity 在每个事件时调用，返回 true 表示导航栏接管
+     * Activity 在每个触摸事件时调用。
+     *
+     * @return true 表示导航栏已接管该事件，Activity 应停止向下分发
      */
     public boolean onGlobalTouch(MotionEvent ev) {
+        int action = ev.getActionMasked();
+
         if (!isDragging) {
-            // 还没进入拖动模式 → 不接管
-            if (ev.getActionMasked() == MotionEvent.ACTION_UP
-                    || ev.getActionMasked() == MotionEvent.ACTION_CANCEL) {
+            // 尚未进入拖动模式：不接管，事件继续正常分发
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
                 handler.removeCallbacks(longPressRunnable);
                 globalTracking = false;
             }
             return false;
         }
 
-        // 已进入拖动模式 → 接管所有事件
         handleDragEvent(ev);
         return true;
     }
 
     /**
-     * 是否处于全局拖动中
+     * 是否正在全局拖动中。
      */
     public boolean isGlobalDragging() {
         return isDragging;
     }
 
-    /**
-     * 取消全局监听（长按判定失败时）
-     */
-    public void cancelGlobalTracking() {
-        handler.removeCallbacks(longPressRunnable);
-        globalTracking = false;
-    }
+    // ==================================================================
+    // 内部类
+    // ==================================================================
 
     /**
-     * 处理拖动中的事件（MOVE / UP / CANCEL）
+     * 单个导航项：图标 + 文字。
+     *
+     * <p>自身持有角度、坐标、图标与文字，并负责自己的绘制与旋转逻辑。
      */
-    private void handleDragEvent(MotionEvent ev) {
-        switch (ev.getActionMasked()) {
-            case MotionEvent.ACTION_MOVE: {
-                float dx = ev.getX() - dragStartX;
-                float deltaDeg = (float) Math.toDegrees(-dx / radius);
-                float newAngle = dragStartAngle + deltaDeg;
+    private static class NavItem {
 
-                float minAngle = items[ITEM_COUNT - 1].angle;
-                float maxAngle = items[0].angle;
-                newAngle = Math.max(minAngle, Math.min(maxAngle, newAngle));
+        /** 在弧线上的角度。 */
+        float angle;
+        /** 图标中心坐标。 */
+        float centerX, centerY;
 
-                glowAngle = newAngle;
-                updateGlowPosition();
+        final int iconRes;
+        final String label;
+        Bitmap icon;
 
-                int idx = angleToIndex(glowAngle);
-                if (idx != selectedIndex) {
-                    applySelection(idx, false);
-                }
-                // ★ 通知外部：页面跟手
-                if (listener != null) {
-                    listener.onProgressChanged(angleToProgress(glowAngle));
-                }
-                invalidate();
-                break;
+        /** 图标绘制矩形，以自身中心为原点。 */
+        final RectF iconRect = new RectF();
+        private final RectF tmpRect = new RectF();
+
+        boolean selected;
+
+        NavItem(int iconRes, String label) {
+            this.iconRes = iconRes;
+            this.label = label;
+        }
+
+        /**
+         * 绘制本项。
+         *
+         * @param canvas    画布
+         * @param iconPaint 图标画笔（已设置好 colorFilter）
+         * @param textPaint 文字画笔（已设置好颜色与字号）
+         * @param textGap   文字与图标底部的间距
+         * @param yOffset   整体垂直微调
+         * @param scale     缩放系数（按压反馈用，图标与文字一起缩放）
+         */
+        void draw(Canvas canvas, Paint iconPaint, Paint textPaint,
+                  float textGap, float yOffset, float scale) {
+            if (icon == null) return;
+
+            // 旋转到"垂直于弧线"：图标默认朝上（270°），需补 90°
+            float rotation = angle + 90f;
+
+            // 回正纠偏：旋转角落在 (90°, 270°) 时再转 180°，
+            // 否则文字会倒立（弧带中段的角度正好落在该区间）
+            float normalized = rotation % 360f;
+            if (normalized < 0) normalized += 360f;
+            boolean flipped = (normalized > 90f && normalized < 270f);
+            float finalRotate = flipped ? rotation + 180f : rotation;
+
+            // 变换顺序必须是：平移 -> 旋转 -> 缩放
+            // 若先缩放再平移，平移量会被一起缩放，位置会错
+            canvas.save();
+            canvas.translate(centerX, centerY + yOffset);
+            canvas.rotate(finalRotate);
+            canvas.scale(scale, scale);
+
+            tmpRect.set(iconRect);
+            canvas.drawBitmap(icon, null, tmpRect, iconPaint);
+
+            if (label != null && !label.isEmpty()) {
+                canvas.drawText(label, 0f, iconRect.bottom + textGap, textPaint);
             }
 
-            case MotionEvent.ACTION_UP:
-            case MotionEvent.ACTION_CANCEL: {
-                isDragging = false;
-                globalTracking = false;
-                snapToNearest();
-                break;
-            }
+            canvas.restore();
         }
     }
-
-
 }
