@@ -2,9 +2,13 @@ package com.example.androiddeveloptest;
 
 import android.animation.ValueAnimator;
 import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffColorFilter;
 import android.graphics.RadialGradient;
 import android.graphics.RectF;
 import android.graphics.Shader;
@@ -30,7 +34,6 @@ public class CurvedNavBar extends View {
 
     // ===== 导航项 =====
     private static final int ITEM_COUNT = 5;     // 5 个图标
-    private float padAngle = 0f;                 // 两端各让出的角度（避开端帽）
 
     // ===== 选中状态 =====
     private int selectedIndex = 2;              // 默认选中中间（index 2）
@@ -44,17 +47,101 @@ public class CurvedNavBar extends View {
     private static final int COLOR_SELECTED   = 0xFFFFC107;  // 琥珀黄
     private static final int COLOR_UNSELECTED = 0xFFFFFFFF;  // 白
 
-    // 圆形画笔（临时替代图标，验证位置用）
-    private final Paint dotPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    // ===== 图标资源 =====
+    private static final int[] ICON_RES = {
+            R.drawable.ic_person,      //5
+            R.drawable.ic_bill,        //4
+            R.drawable.ic_home,        //3
+            R.drawable.ic_statistics,  //3
+            R.drawable.ic_tools,       //1
+    };
+    private static final float ICON_CANVAS = 192f;   // 图标画布边长（统一规格）
+
+    // 颜色滤镜（预先创建，避免 onDraw 里反复 new）
+    private PorterDuffColorFilter filterSelected;
+    private PorterDuffColorFilter filterUnselected;
+
+    // 整体垂直微调（负值上移，正值下移），单位 px
+    private float verticalAdjust;                       // 只声明，不给初值
 
     private final Path arcClipPath = new Path();   // 用于裁剪的"实心"弧带
 
-    // 缓存每个图标的位置，避免重复计算
-    private final float[] itemX = new float[ITEM_COUNT];
-    private final float[] itemY = new float[ITEM_COUNT];
-    private final float[] itemAngle = new float[ITEM_COUNT];
+    // ===== 导航项 =====
+    private final NavItem[] items = new NavItem[ITEM_COUNT];
+
+    // 图标与文字的画笔
+    private final Paint iconPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
     private ValueAnimator glowAnimator;
+
+    /**
+     * 单个导航项：图标 + 文字
+     * 封装了它自己的位置、旋转、绘制逻辑
+     */
+    private static class NavItem {
+        float angle;                    // 在弧线上的角度
+        float centerX, centerY;         // 图标中心坐标
+        int iconRes;                    // 图标资源 id
+        String label;                   // 文字
+
+        Bitmap icon;                    // 加载后的位图
+        final RectF iconRect = new RectF();   // 图标绘制矩形（相对中心，未旋转）
+        final RectF tmpRect = new RectF();    // 绘制时复用
+
+        boolean selected;               // 是否选中
+        float pressScale = 1f;          // 按压缩放（1.0 = 正常）
+
+
+
+        NavItem(int iconRes, String label) {
+            this.iconRes = iconRes;
+            this.label = label;
+        }
+        /**
+         * 绘制这个导航项（图标 + 文字）
+         *
+         * @param canvas    画布
+         * @param iconPaint 图标画笔（已设置好 colorFilter）
+         * @param textPaint 文字画笔
+         * @param textGap   文字与图标之间的间距
+         */
+        void draw(Canvas canvas, Paint iconPaint, Paint textPaint,
+                  float textGap, float yOffset) {
+            if (icon == null) return;
+
+            // ===== 1. 计算旋转角 =====
+            float rotation = angle + 90f;      // 垂直于弧线
+
+            // ===== 2. 回正纠正：旋转角落在 (90, 270) 内时多转 180° =====
+            float r = rotation % 360f;
+            if (r < 0) r += 360f;
+            boolean flipped = (r > 90f && r < 270f);
+            float finalRotate = flipped ? rotation + 180f : rotation;
+
+            // ===== 3. 转画布，以中心点为轴 =====
+            canvas.save();
+            canvas.translate(centerX, centerY + yOffset);   // ← 加 yOffset
+            canvas.rotate(finalRotate);             // ② 旋转（原点已是中心）
+
+            // ===== 4. 画图标（居中在原点）=====
+            float s = pressScale;
+            tmpRect.set(
+                    iconRect.left * s, iconRect.top * s,
+                    iconRect.right * s, iconRect.bottom * s
+            );
+            canvas.drawBitmap(icon, null, tmpRect, iconPaint);
+
+            // ===== 5. 画文字（在图标下方）=====
+            if (label != null && !label.isEmpty()) {
+                // 因为已经平移+旋转，这里的 (0,y) 就是"图标中心正下方"
+                float textY = (iconRect.bottom * s) + textGap;
+                canvas.drawText(label, 0f, textY, textPaint);
+            }
+
+            canvas.restore();
+        }
+    }
 
 
     // ===== 构造方法：三个都要写 =====
@@ -72,10 +159,31 @@ public class CurvedNavBar extends View {
     }
 
     private void init() {
-        arcPaint.setStyle(Paint.Style.STROKE);   // 描边模式
-        arcPaint.setColor(0xFF16506B);           // 深蓝
-        arcPaint.setStrokeCap(Paint.Cap.ROUND);  // ★ 两头变圆
+        arcPaint.setStyle(Paint.Style.STROKE);
+        arcPaint.setColor(0xFF16506B);
+        arcPaint.setStrokeCap(Paint.Cap.ROUND);
         arcPaint.setStrokeJoin(Paint.Join.ROUND);
+
+        // 颜色滤镜：SRC_IN 保留透明度，只换颜色
+        filterSelected = new PorterDuffColorFilter(COLOR_SELECTED, PorterDuff.Mode.SRC_IN);
+        filterUnselected = new PorterDuffColorFilter(COLOR_UNSELECTED, PorterDuff.Mode.SRC_IN);
+
+        // 文字画笔
+        textPaint.setColor(COLOR_UNSELECTED);
+        textPaint.setTextAlign(Paint.Align.CENTER);   // 以中心对齐绘制
+        textPaint.setTextSize(30f);                    // 先用固定值，后面按尺寸调整
+
+        // 创建 5 个导航项（顺序 = 从左到右）
+        items[0] = new NavItem(R.drawable.ic_tools,      "工具");
+        items[1] = new NavItem(R.drawable.ic_statistics, "统计");
+        items[2] = new NavItem(R.drawable.ic_home,       "主页");
+        items[3] = new NavItem(R.drawable.ic_bill,       "账单");
+        items[4] = new NavItem(R.drawable.ic_person,     "我的");
+
+        // 加载图标
+        for (NavItem item : items) {
+            item.icon = BitmapFactory.decodeResource(getResources(), item.iconRes);
+        }
     }
 
     /**
@@ -110,8 +218,12 @@ public class CurvedNavBar extends View {
         }
 
         float from = glowAngle;
-        float to = itemAngle[index];
+        float to = items[index].angle;
 
+        // 同步所有 item 的选中状态
+        for (int i = 0; i < ITEM_COUNT; i++) {
+            items[i].selected = (i == index);
+        }
         selectedIndex = index;
 
         glowAnimator = ValueAnimator.ofFloat(from, to);
@@ -129,38 +241,37 @@ public class CurvedNavBar extends View {
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
 
-        // 左右间距
+        // ==================== 1. 弧带几何 ====================
+        // 左右间距：弦长 = 宽度的 77%
         float chord = w * 0.77f;
 
-        // 半径：控制"弯度"。这个 0.896 来自对你那张图的像素扫描（R/弦长 = 0.896）
+        // 半径：控制弯度（R/弦长 = 0.896，来自原图像素扫描）
         radius = chord * 0.896f;
 
-        // 厚度：弧带有多粗，同样来自扫描（厚度/弦长 = 0.183）
+        // 厚度：弧带粗细（厚度/弦长 = 0.183）
         thickness = chord * 0.183f;
         arcPaint.setStrokeWidth(thickness);
 
-        // 圆心：水平居中
+        // 圆心水平居中
         cx = w / 2f;
 
-        // 圆心纵坐标：要向上偏移，弧才会"向上开口"
-        // 注意这个值可能是负数，圆心跑到控件外面是正常的（下面解释）
-        float bottomMargin = h * 0.16f;              // 底部间距
-        float lowestCenter = h - bottomMargin - thickness / 2f;  // 中心线最低处
-        cy = lowestCenter - radius;                  // ★ 倒推圆心
 
-        // addArc 需要一个"圆的外接矩形"来定义这个圆
+        // 圆心纵坐标：由"中心线最低点"倒推，保证弧带底部不超出控件
+        float bottomMargin = h * 0.16f;
+        float lowestCenter = h - bottomMargin - thickness / 2f;
+        cy = lowestCenter - radius;
+
+        // 弧带的外接矩形（定义这个圆）
         arcRect.set(cx - radius, cy - radius, cx + radius, cy + radius);
 
         // 起始角：让弧对称于竖直中线（90° 是正下方）
         startAngle = 90f - SWEEP / 2f;
 
-        // 重建路径（reset 是必须的，否则会不断往旧路径上叠加）
+        // 重建描边路径
         arcPath.reset();
         arcPath.addArc(arcRect, startAngle, SWEEP);
 
-        // ===== 构造用于裁剪的"实心弧带"路径 =====
-        // 外弧半径 = radius + thickness/2
-        // 内弧半径 = radius - thickness/2
+        // ==================== 2. 裁剪用的"实心弧带"路径 ====================
         float rOuter = radius + thickness / 2f;
         float rInner = radius - thickness / 2f;
 
@@ -168,67 +279,81 @@ public class CurvedNavBar extends View {
         RectF innerRect = new RectF(cx - rInner, cy - rInner, cx + rInner, cy + rInner);
 
         arcClipPath.reset();
-        // ① 外弧（从左端顺时针扫到右端）
+
+        // ① 外弧
         arcClipPath.addArc(outerRect, startAngle, SWEEP);
 
-        // ② 右端帽：从"外弧终点"起，沿径向向外→扫 180° 到"内弧起点"
-        // 端帽圆心就是中心线的右端点
+        // ② 右端帽（从外弧终点扫 180° 到内弧起点）
         float endRad = (float) Math.toRadians(startAngle + SWEEP);
         float endCx = cx + radius * (float) Math.cos(endRad);
         float endCy = cy + radius * (float) Math.sin(endRad);
-        // 端帽的起始角 = 从圆心指向"外弧终点"的方向（即向外径向）
-        // 外弧终点角度就是 (startAngle + SWEEP)，因为它在同一条射线上
-        float endCapStart = startAngle + SWEEP;
         arcClipPath.arcTo(
                 new RectF(endCx - thickness / 2f, endCy - thickness / 2f,
                         endCx + thickness / 2f, endCy + thickness / 2f),
-                endCapStart, 180f, false);
+                startAngle + SWEEP, 180f, false);
 
-        // ③ 内弧（从右端反向扫回左端）
+        // ③ 内弧（反向扫回）
         arcClipPath.addArc(innerRect, startAngle + SWEEP, -SWEEP);
 
-        // ④ 左端帽：同样的道理
+        // ④ 左端帽（从内侧起，扫到外侧）
         float startRad = (float) Math.toRadians(startAngle);
         float startCx = cx + radius * (float) Math.cos(startRad);
         float startCy = cy + radius * (float) Math.sin(startRad);
-        float startCapStart = startAngle + 180f;   // ★ 从内侧起，扫到外侧
         arcClipPath.arcTo(
                 new RectF(startCx - thickness / 2f, startCy - thickness / 2f,
                         startCx + thickness / 2f, startCy + thickness / 2f),
-                startCapStart, 180f, false);
+                startAngle + 180f, 180f, false);
 
         arcClipPath.close();
 
-        // ===== 计算 5 个图标的位置 =====
-        // 目标：让点尽量靠向弧带两端，同时避开端帽
-        // 做法：先算出端帽占据的角度，再按它留出边距（自适应，与厚度联动）
+        // ==================== 3. 图标分布区间 ====================
+        // 端帽占据的角度
         float capAngle = (float) Math.toDegrees(
-                Math.atan((thickness / 2f) / radius));   // 端帽占据的角度
+                Math.atan((thickness / 2f) / radius));
 
-        // 1.2f 是"安全系数"：大于 1 表示留的边距比端帽略宽一点
+        // 留出 1.2 倍端帽角度作为边距，避免图标压到端帽上
         float spreadSweep = SWEEP - capAngle * 1.2f;
+        float spreadStart = 90f - spreadSweep / 2f;
 
-        float spreadStart = 90f - spreadSweep / 2f;      // 对称分布
+        // ==================== 4. 逐个更新导航项 ====================
+        float iconSize = thickness * 0.63f;      // 图标边长
+        float textSize = thickness * 0.16f;      // 文字大小
+        textPaint.setTextSize(textSize);
+
+        // 图标矩形半边长（相对中心，负数表示向左/上）
+        float half = iconSize / 2f;
 
         for (int i = 0; i < ITEM_COUNT; i++) {
-            float a = spreadStart + spreadSweep * i / (ITEM_COUNT - 1);
-            itemAngle[i] = a;
+            NavItem item = items[i];
 
+            // 角度：5 个等分点（i/(n-1) 让首尾正好在区间两端）
+            float a = spreadStart + spreadSweep * (ITEM_COUNT - 1 - i) / (ITEM_COUNT - 1);
+            item.angle = a;
+
+            // 坐标
             float[] p = pointOnArc(a);
-            itemX[i] = p[0];
-            itemY[i] = p[1];
+            item.centerX = p[0];
+            item.centerY = p[1];
+
+            // 图标矩形：以 item 中心为原点
+            item.iconRect.set(-half, -half, half, half);
+
+            // 选中状态
+            item.selected = (i == selectedIndex);
         }
 
-
-        // ===== 光晕半径：中间图标中心 → 控件顶部中点 (w/2, 0) =====
-        int mid = ITEM_COUNT / 2;                    // 5 → 2
-        float dx0 = itemX[mid] - w / 2f;
-        float dy0 = itemY[mid] - 0f;
-        glowRadius = (float) Math.hypot(dx0, dy0)* 0.6f;//光晕扩散距离
+        // ==================== 5. 光晕 ====================
+        // 半径：中间图标中心 → 控件顶部中点 (w/2, 0)
+        int mid = ITEM_COUNT / 2;
+        float dx0 = items[mid].centerX - w / 2f;
+        float dy0 = items[mid].centerY;
+        glowRadius = (float) Math.hypot(dx0, dy0) * 0.6f;
 
         // 光晕中心初始在中间图标上
-        glowAngle = itemAngle[mid];
+        glowAngle = items[mid].angle;
         updateGlowPosition();
+
+        verticalAdjust = -thickness * 0.08f;   // 负值 = 上移
     }
 
 
@@ -242,12 +367,15 @@ public class CurvedNavBar extends View {
         // 2. 光晕（在弧带之上，图标之下）
         drawGlow(canvas);
 
-        // 3. 图标（最上层）
-        float dotRadius = thickness * 0.22f;
-        for (int i = 0; i < ITEM_COUNT; i++) {
-            dotPaint.setColor(i == selectedIndex ? COLOR_SELECTED : COLOR_UNSELECTED);
-            canvas.drawCircle(itemX[i], itemY[i], dotRadius, dotPaint);
+        // 3. 所有导航项（图标 + 文字，各自处理旋转）
+        float textGap = thickness * 0.14f;
+        for (NavItem item : items) {
+            iconPaint.setColorFilter(item.selected ? filterSelected : filterUnselected);
+            textPaint.setColor(item.selected ? COLOR_SELECTED : COLOR_UNSELECTED);
+            item.draw(canvas, iconPaint, textPaint, textGap, verticalAdjust);
         }
+        // 用完清掉滤镜，避免影响后续绘制
+        iconPaint.setColorFilter(null);
     }
 
     private void drawGlow(Canvas canvas) {
