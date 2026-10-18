@@ -5,6 +5,7 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
+import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.PorterDuff;
@@ -52,10 +53,10 @@ public class CurvedNavBar extends View {
     private static final long LONG_PRESS_MS = 400;
 
     /** 选中项颜色（明黄）。 */
-    private static final int COLOR_SELECTED = 0xFFFFC107;
+    private static final int COLOR_SELECTED = 0xFFFF7F2E;
 
     /** 未选中项颜色（白）。 */
-    private static final int COLOR_UNSELECTED = 0xFFFFFFFF;
+    private static final int COLOR_UNSELECTED = 0xB3FF7F2E;
 
     /** 弧带底色（深蓝）。 */
     private static final int COLOR_ARC = 0xFF16506B;
@@ -84,6 +85,8 @@ public class CurvedNavBar extends View {
     // ==================================================================
 
     private final Paint arcPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    /** 弧带外描边：一圈细线勾出弧带轮廓，增强与背景的分离感。 */
+    private final Paint edgePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint glowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint iconPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -220,9 +223,14 @@ public class CurvedNavBar extends View {
 
     private void init() {
         arcPaint.setStyle(Paint.Style.STROKE);
-        arcPaint.setColor(COLOR_ARC);
+        // 弧带颜色改为橙条同款渐变，在 onSizeChanged 里按实际宽度创建 LinearGradient
         arcPaint.setStrokeCap(Paint.Cap.ROUND);
         arcPaint.setStrokeJoin(Paint.Join.ROUND);
+
+        // 外描边：画在弧带渐变之下，宽度比弧带厚一点，露出边缘一圈浅线
+        edgePaint.setStyle(Paint.Style.STROKE);
+        edgePaint.setColor(0xFFF2E7D5);
+        edgePaint.setStrokeCap(Paint.Cap.ROUND);
 
         // PorterDuff.Mode.SRC_IN：保留图标本身的透明度，只替换颜色
         filterSelected = new PorterDuffColorFilter(COLOR_SELECTED, PorterDuff.Mode.SRC_IN);
@@ -257,6 +265,11 @@ public class CurvedNavBar extends View {
         computeGlow(w);
     }
 
+    /** dp 转 px。 */
+    private float dp(float v) {
+        return v * getResources().getDisplayMetrics().density;
+    }
+
     /**
      * 计算圆心、半径、厚度等基础几何量。
      */
@@ -266,6 +279,9 @@ public class CurvedNavBar extends View {
         thickness = chord * RATIO_THICKNESS;
         arcPaint.setStrokeWidth(thickness);
 
+        // 外描边比弧带宽 2dp：渐变画上去后四周各露出 1dp 浅线
+        edgePaint.setStrokeWidth(thickness + dp(2));
+
         cx = w / 2f;
 
         // 由"中心线最低点"反推圆心，保证弧带底部不超出控件
@@ -274,6 +290,13 @@ public class CurvedNavBar extends View {
         cy = lowestCenter - radius;
 
         startAngle = 90f - SWEEP / 2f;
+
+        // 弧带渐变：奶白（上 #FFFDF8 → 下 #FBF3E4）
+        LinearGradient arcGradient = new LinearGradient(
+                0, cy - radius - thickness / 2f, 0, cy - radius + thickness / 2f,
+                new int[]{0xFFFFFDF8, 0xFFFBF3E4},
+                null, Shader.TileMode.CLAMP);
+        arcPaint.setShader(arcGradient);
     }
 
     /**
@@ -376,6 +399,9 @@ public class CurvedNavBar extends View {
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
 
+        // 0. 弧带外描边（参考圆按钮的浅描边，增强与背景的分离感）
+        canvas.drawPath(arcPath, edgePaint);
+
         // 1. 弧带
         canvas.drawPath(arcPath, arcPaint);
 
@@ -390,9 +416,9 @@ public class CurvedNavBar extends View {
         RadialGradient shader = new RadialGradient(
                 glowX, glowY, glowRadius,
                 new int[]{
-                        0xFFFFF59D,   // 中心：淡黄
-                        0x8FFFEB3B,   // 中段：明黄
-                        0x00FFEB3B    // 边缘：透明
+                        0x00FF7F2E,   // 中心：全透明
+                        0x4DFF7F2E,   // 中段：橙 30%
+                        0x00FF7F2E    // 外圈：全透明
                 },
                 new float[]{0f, 0.35f, 1f},
                 Shader.TileMode.CLAMP);
@@ -516,7 +542,7 @@ public class CurvedNavBar extends View {
         });
         glowAnimator.start();
 
-        // 吸附时 index 可能没变，但页面仍需归位，所以无条件通知
+        // 吸附时 index 可能没变，但页面仍需归位，无条件通知
         if (listener != null) {
             listener.onItemSelected(index);
         }
@@ -616,22 +642,27 @@ public class CurvedNavBar extends View {
     private boolean handleTouchDown(MotionEvent event) {
         lastDownX = event.getX();
 
+        // 无论按在哪里，都先启动长按计时（长按在整个控件内都有效）
+        handler.removeCallbacks(longPressRunnable);
+        handler.postDelayed(longPressRunnable, LONG_PRESS_MS);
+
         float dx = event.getX() - cx;
         float dy = event.getY() - cy;
         float r = (float) Math.hypot(dx, dy);
         float halfThick = thickness / 2f;
 
-        // 点在弧带外：不消费事件，交给下层的页面处理
-        if (r < radius - halfThick || r > radius + halfThick) {
-            return false;
+        // 是否落在弧带上 —— 决定要不要做"点击选中"和按压反馈
+        boolean onArc = (r >= radius - halfThick && r <= radius + halfThick);
+
+        if (onArc) {
+            float angle = (float) Math.toDegrees(Math.atan2(dy, dx));
+            pressedIndex = angleToIndex(angle);
+            animatePress(true);
+        } else {
+            pressedIndex = -1;      // 弧带外：没有"按下项"，不做缩放
         }
 
-        float angle = (float) Math.toDegrees(Math.atan2(dy, dx));
-        pressedIndex = angleToIndex(angle);
-
-        animatePress(true);
-        handler.postDelayed(longPressRunnable, LONG_PRESS_MS);
-        return true;
+        return true;   // ★ 无论如何都消费事件，才能收到后续的 MOVE / UP
     }
 
     /**
@@ -696,6 +727,10 @@ public class CurvedNavBar extends View {
         globalTracking = true;
 
         if (!isDragging) {
+            // 先清除可能存在的旧任务：
+            // Activity 转发和控件自身 onTouchEvent 都可能启动计时，
+            // 不去重会导致长按逻辑执行两次（震动两次、起始角度被覆盖）
+            handler.removeCallbacks(longPressRunnable);
             handler.postDelayed(longPressRunnable, LONG_PRESS_MS);
         }
     }
@@ -726,6 +761,21 @@ public class CurvedNavBar extends View {
      */
     public boolean isGlobalDragging() {
         return isDragging;
+    }
+
+    /**
+     * 弧带在控件坐标系中的最高点 y 值（含半厚度）。
+     *
+     * 弧带两端向上翘起，最高点位于两个端点处。
+     * 端点中心线的 y = cy + radius * sin(startAngle)，
+     * 再减去半个厚度得到外边缘。
+     *
+     * @return 最高点的 y（控件坐标系，已钳制到不小于 0）
+     */
+    public float getArcTopY() {
+        float y = cy + radius * (float) Math.sin(Math.toRadians(startAngle))
+                - thickness / 2f;
+        return Math.max(0f, y);
     }
 
     // ==================================================================

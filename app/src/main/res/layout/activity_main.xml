@@ -26,4 +26,37 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
+    <!-- 左下角：日志（声明在导航栏之后，确保显示在上层） -->
+    <TextView
+        android:id="@+id/fabLog"
+        android:layout_width="50dp"
+        android:layout_height="50dp"
+        android:layout_marginStart="12dp"
+        android:layout_marginBottom="8dp"
+        android:background="@drawable/bg_fab"
+        android:elevation="0dp"
+        android:gravity="center"
+        android:text="≡"
+        android:textColor="#FF7F2E"
+        android:textSize="22sp"
+        android:textStyle="bold"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
+
+    <!-- 右下角：设置 -->
+    <TextView
+        android:id="@+id/fabSettings"
+        android:layout_width="50dp"
+        android:layout_height="50dp"
+        android:layout_marginEnd="12dp"
+        android:layout_marginBottom="8dp"
+        android:background="@drawable/bg_fab"
+        android:elevation="0dp"
+        android:gravity="center"
+        android:text="⚙"
+        android:textColor="#FF7F2E"
+        android:textSize="21sp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
 </androidx.constraintlayout.widget.ConstraintLayout>
