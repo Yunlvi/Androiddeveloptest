@@ -144,11 +144,6 @@ public class WheelView extends View {
         return selectedIndex;
     }
 
-    public String getSelectedItem() {
-        return (selectedIndex >= 0 && selectedIndex < items.length)
-                ? items[selectedIndex] : "";
-    }
-
     /** 外部设置选中项（不动画）。 */
     public void setSelectedIndex(int index) {
         if (items.length == 0) return;
@@ -156,13 +151,6 @@ public class WheelView extends View {
         selectedIndex = i;
         scrollOffset = i * itemHeight;
         scrollToOffset(scrollOffset, false);
-        invalidate();
-    }
-
-    /** 文字颜色。 */
-    public void setColors(int normal, int selected) {
-        this.normalColor = normal;
-        this.selectedColor = selected;
         invalidate();
     }
 

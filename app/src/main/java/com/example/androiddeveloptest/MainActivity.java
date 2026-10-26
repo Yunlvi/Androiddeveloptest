@@ -178,8 +178,9 @@ public class MainActivity extends AppCompatActivity {
      */
     private View buildPlaceholderPage(int index) {
         String[] titles = {"工具", "统计", "主页", "账单", "我的"};
-        int[] colors = {0xFFE3F2FD, 0xFFF3E5F5, 0xFFFFF8E1,
-                0xFFE8F5E9, 0xFFFBE9E7};
+        // 暖色系占位底色，与整体配色统一
+        int[] colors = {0xFFFDF3E3, 0xFFFBEFE0, 0xFFFDF3E3,
+                0xFFFDF3E3, 0xFFFBEFE2};
 
         FrameLayout page = new FrameLayout(this);
         page.setLayoutParams(new FrameLayout.LayoutParams(
@@ -190,7 +191,7 @@ public class MainActivity extends AppCompatActivity {
         TextView tv = new TextView(this);
         tv.setText(titles[index]);
         tv.setTextSize(36f);
-        tv.setTextColor(0xFF333333);
+        tv.setTextColor(0xFFB9A896);
         tv.setGravity(Gravity.CENTER);
         page.addView(tv);
         return page;

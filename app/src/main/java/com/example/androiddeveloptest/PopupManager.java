@@ -150,13 +150,11 @@ public class PopupManager {
         // 第二次点击会穿透到页面内容再次触发 show，导致叠出重复弹窗
         long now = android.os.SystemClock.uptimeMillis();
         if (now - lastShowTime < 350) {
-            android.util.Log.d("Popup", "show blocked by debounce");
             return null;
         }
         lastShowTime = now;
 
         final PopupView popup = new PopupView(activity);
-        android.util.Log.d("Popup", "show: title=" + title + " stackBefore=" + stack.size());
         popup.setTitle(title);
         popup.setContent(content);
         popup.setOnCloseListener(this::dismissTop);
@@ -179,7 +177,6 @@ public class PopupManager {
 
         popup.post(() -> {
             int popupHeight = popup.getStableHeight();
-            android.util.Log.d("Popup", "post: h=" + popupHeight + " vis=" + popup.getVisibility());
             if (popupHeight <= 0) {
                 // 极端情况：布局尚未完成，直接显示不再动画
                 popup.setVisibility(View.VISIBLE);
@@ -236,7 +233,6 @@ public class PopupManager {
 
         // 从栈顶（最上层）向下排
         int cursorBottom = layerH - margin;   // 当前可用的底边
-        android.util.Log.d("Popup", "relayout: stack=" + stack.size() + " layerH=" + layerH);
 
         for (int i = stack.size() - 1; i >= 0; i--) {
             PopupView p = stack.get(i);
@@ -245,11 +241,6 @@ public class PopupManager {
 
             int targetTop = cursorBottom - h;
             float translation = targetTop - (layerH - margin - h);
-
-            android.util.Log.d("Popup", "  layer" + i + ": h=" + h
-                    + " targetTop=" + targetTop
-                    + " transY=" + translation
-                    + " curTransY=" + p.getTranslationY());
 
             // 恢复可见性：show() 曾把新弹窗设为 INVISIBLE 等待测量，
             // 重排时必须切回 VISIBLE，否则 View 永远不绘制

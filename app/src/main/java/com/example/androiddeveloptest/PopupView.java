@@ -52,9 +52,6 @@ public class PopupView extends FrameLayout {
     /** 触摸拦截层（被锁定时盖在弹窗上，消费全部触摸）。 */
     private View touchBlocker;
 
-    /** 相对初始位置（贴底）的垂直偏移（px，正值向上）。 */
-    private float stackOffset;
-
     /** 首次测量后的稳定高度（px）。getHeight() 在某些时机会返回异常值，用此缓存。 */
     private int cachedHeight = -1;
 
@@ -83,15 +80,6 @@ public class PopupView extends FrameLayout {
     /** 设置触摸拦截层。 */
     void setTouchBlocker(View blocker) {
         this.touchBlocker = blocker;
-    }
-
-    /** 获取/设置堆叠偏移（正值向上）。 */
-    float getStackOffset() {
-        return stackOffset;
-    }
-
-    void setStackOffset(float offset) {
-        this.stackOffset = offset;
     }
 
     public PopupView(@NonNull Context context) {
@@ -206,10 +194,5 @@ public class PopupView extends FrameLayout {
 
     private int dp(int v) {
         return (int) (v * getResources().getDisplayMetrics().density);
-    }
-
-    /** 内容容器，供外部继续往里加子视图。 */
-    public LinearLayout getContentContainer() {
-        return contentContainer;
     }
 }

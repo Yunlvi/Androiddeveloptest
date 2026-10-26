@@ -166,24 +166,6 @@ public class AddRecordActivity extends AppCompatActivity {
         updateDateLabel();
         updateAccountLabel();
 
-        // 临时诊断：测量各区块实际高度，用于压缩布局
-        findViewById(android.R.id.content).post(() -> {
-            android.util.Log.d("Layout", "contentH=" + findViewById(android.R.id.content).getHeight());
-            int[] ids = {R.id.gridCategory, R.id.rowDate, R.id.btnSave};
-            String[] names = {"grid", "rowDate", "btnSave"};
-            for (int i = 0; i < ids.length; i++) {
-                View v = findViewById(ids[i]);
-                if (v != null) {
-                    android.util.Log.d("Layout", names[i] + " h=" + v.getHeight()
-                            + " y=" + v.getTop());
-                }
-            }
-            android.view.ViewGroup sv = findViewById(R.id.scrollRoot);
-            if (sv != null) {
-                android.util.Log.d("Layout", "scrollViewport h=" + sv.getHeight()
-                        + "  childContentH=" + ((android.view.View) sv.getChildAt(0)).getHeight());
-            }
-        });
     }
 
     // ==================================================================
