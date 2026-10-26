@@ -40,6 +40,9 @@ public class PopupView extends FrameLayout {
     private static final int PANEL_RIGHT_EXTEND_PX = -7;
 
     private final TextView tvTitle;
+    /** 底部胶囊按钮内的图标与文案。 */
+    private final TextView tvButtonIcon;
+    private final TextView tvButtonLabel;
     private final FrameLayout panel;
     private final LinearLayout contentContainer;
 
@@ -101,6 +104,8 @@ public class PopupView extends FrameLayout {
         setClipToPadding(false);
 
         tvTitle = findViewById(R.id.tvTitle);
+        tvButtonIcon = findViewById(R.id.btnCloseIcon);
+        tvButtonLabel = findViewById(R.id.btnCloseLabel);
         panel = findViewById(R.id.panel);
         contentContainer = findViewById(R.id.contentContainer);
         View btnClose = findViewById(R.id.btnClose);
@@ -165,6 +170,25 @@ public class PopupView extends FrameLayout {
     /** 设置关闭按钮的回调。 */
     void setOnCloseListener(Runnable listener) {
         this.onCloseListener = listener;
+    }
+
+    /**
+     * 设置底部胶囊按钮的文案。
+     *
+     * <p>用于"用户填完只会点确认"的场景：把「关闭」改成「确定」，
+     * 点击即执行自定义动作，而不是单纯关窗。
+     */
+    void setButtonText(String text) {
+        if (tvButtonLabel != null) {
+            tvButtonLabel.setText(text);
+        }
+    }
+
+    /** 设置底部胶囊按钮左侧的图标（如 × 或 ✓）。 */
+    void setButtonIcon(String icon) {
+        if (tvButtonIcon != null) {
+            tvButtonIcon.setText(icon);
+        }
     }
 
     /** 设置标题。 */

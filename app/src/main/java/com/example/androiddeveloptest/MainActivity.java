@@ -23,6 +23,11 @@ public class MainActivity extends AppCompatActivity {
     private FrameLayout pagerContainer;
 
     private final View[] pages = new View[5];
+    /** 账单页的列表与适配器（下标 3）。 */
+    private BillAdapter billAdapter;
+    private android.widget.ListView lvBills;
+    /** 账单页根视图（此时 pages 数组尚未赋值，需单独持有）。 */
+    private View billPage;
     private int screenWidth;
 
     /** 当前页面进度：0 = 第0页，4 = 第4页，2.5 = 中间态 */
@@ -64,6 +69,8 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         EdgeToEdge.enable(this);
+        // 加载持久化的记账数据（首屏入口，只需一次）
+        RecordStore.init(this);
         setContentView(R.layout.activity_main);
 
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main), (v, insets) -> {
@@ -106,6 +113,10 @@ public class MainActivity extends AppCompatActivity {
             if (i == 2) {
                 page = getLayoutInflater().inflate(
                         R.layout.page_home, pagerContainer, false);
+            } else if (i == 3) {
+                page = getLayoutInflater().inflate(
+                        R.layout.page_bill, pagerContainer, false);
+                setupBillPage(page);
             } else {
                 page = buildPlaceholderPage(i);
             }
@@ -115,6 +126,51 @@ public class MainActivity extends AppCompatActivity {
             pagerContainer.addView(page);
             pages[i] = page;
         }
+    }
+
+    /**
+     * 初始化账单页：绑定列表适配器并填充数据。
+     *
+     * <p>注意：此时 setupPages 尚未把 page 写入 pages 数组，
+     * 因此汇总视图直接持有引用，不能通过 pages[3] 反查。
+     */
+    private void setupBillPage(View page) {
+        billPage = page;
+        lvBills = page.findViewById(R.id.lvBills);
+        billAdapter = new BillAdapter(this);
+        lvBills.setAdapter(billAdapter);
+        refreshBillPage();
+    }
+
+    /**
+     * 刷新账单页：汇总金额 + 列表内容 + 空状态切换。
+     */
+    private void refreshBillPage() {
+        if (billAdapter == null || billPage == null) return;
+
+        java.util.List<RecordStore.Record> all = RecordStore.getAll();
+        billAdapter.setData(all);
+
+        // 汇总
+        TextView tvExpense = billPage.findViewById(R.id.tvBillExpense);
+        TextView tvIncome = billPage.findViewById(R.id.tvBillIncome);
+        TextView tvHeader = billPage.findViewById(R.id.tvBillHeader);
+        tvExpense.setText("¥" + formatMoney(RecordStore.totalOf(RecordStore.TYPE_EXPENSE)));
+        tvIncome.setText("¥" + formatMoney(RecordStore.totalOf(RecordStore.TYPE_INCOME)));
+        tvHeader.setText(all.isEmpty() ? "全部记录" : "全部记录（" + all.size() + " 条）");
+
+        // 空状态
+        lvBills.setVisibility(all.isEmpty() ? View.GONE : View.VISIBLE);
+        billPage.findViewById(R.id.tvBillEmpty)
+                .setVisibility(all.isEmpty() ? View.VISIBLE : View.GONE);
+    }
+
+    /** 金额格式化：整数不带小数。 */
+    private String formatMoney(double v) {
+        if (v == Math.floor(v) && !Double.isInfinite(v)) {
+            return String.valueOf((long) v) + ".00";
+        }
+        return String.format(java.util.Locale.getDefault(), "%.2f", v);
     }
 
     /**
@@ -218,6 +274,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onResume() {
         super.onResume();
         refreshHomeData();
+        refreshBillPage();
     }
 
     /**

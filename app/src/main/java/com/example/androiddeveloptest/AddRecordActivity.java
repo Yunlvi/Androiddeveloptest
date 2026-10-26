@@ -13,6 +13,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
+import java.util.Calendar;
 
 /**
  * 记一笔页面（二级页面）。
@@ -33,6 +34,10 @@ public class AddRecordActivity extends AppCompatActivity {
     private static final String[] CATEGORY_NAMES = {
             "餐饮", "交通", "购物", "娱乐", "居住", "医疗", "学习", "更多"
     };
+    /** 收入分类（与支出分开，避免"餐饮收入"这类不合理组合）。 */
+    private static final String[] INCOME_CATEGORY_NAMES = {
+            "工资", "奖金", "理财", "兼职", "红包", "其他"
+    };
     private static final int[] CATEGORY_COLORS = {
             0xFFF5A623, 0xFF3D9BE9, 0xFFE05A8C, 0xFF8B5CF6,
             0xFF2FB88A, 0xFFE5484D, 0xFF3B4E87, 0xFF9A9A9A
@@ -41,6 +46,9 @@ public class AddRecordActivity extends AppCompatActivity {
             0xFFFFF4E0, 0xFFE8F4FD, 0xFFFDE8F0, 0xFFF0E8FD,
             0xFFE0F7EF, 0xFFFDE8E8, 0xFFE8EDF7, 0xFFF0F0F0
     };
+
+    /** 可选的账户。 */
+    private static final String[] ACCOUNTS = {"现金", "微信", "支付宝", "银行卡"};
 
     private int type;
     private boolean isIncome;
@@ -53,9 +61,14 @@ public class AddRecordActivity extends AppCompatActivity {
     /** 当前选中的分类下标（-1 表示未选）。 */
     private int selectedCategory = -1;
     /** 分类项视图。 */
-    private final View[] categoryViews = new View[CATEGORY_NAMES.length];
+    private final View[] categoryViews = new View[8];
     /** 分类图标视图，单独持有便于换背景。 */
-    private final View[] categoryIcons = new View[CATEGORY_NAMES.length];
+    private final View[] categoryIcons = new View[8];
+
+    /** 记账日期（当天 0 点）。默认今天。 */
+    private long selectedDateMillis;
+    /** 当前账户。 */
+    private String selectedAccount = "现金";
 
     /** 金额清空按钮。 */
     private TextView btnClear;
@@ -86,6 +99,14 @@ public class AddRecordActivity extends AppCompatActivity {
 
         type = getIntent().getIntExtra(EXTRA_TYPE, RecordStore.TYPE_EXPENSE);
         isIncome = (type == RecordStore.TYPE_INCOME);
+
+        // 默认日期：今天 0 点
+        Calendar today = Calendar.getInstance();
+        today.set(Calendar.HOUR_OF_DAY, 0);
+        today.set(Calendar.MINUTE, 0);
+        today.set(Calendar.SECOND, 0);
+        today.set(Calendar.MILLISECOND, 0);
+        selectedDateMillis = today.getTimeInMillis();
 
         tvTitle = findViewById(R.id.tvTitle);
         tvCurrency = findViewById(R.id.tvCurrency);
@@ -131,13 +152,38 @@ public class AddRecordActivity extends AppCompatActivity {
         findViewById(R.id.btnSettings).setOnClickListener(v ->
                 toast("设置功能占位符"));
 
-        // 日期行：点击弹出确认弹窗
+        // 日期行：点击弹出三列滚轮选择日期
         findViewById(R.id.rowDate).setOnClickListener(v ->
                 showDatePopup());
+
+        // 账户行：点击弹出账户选择
+        findViewById(R.id.rowAccount).setOnClickListener(v ->
+                showAccountPopup());
 
         setupQuickAmounts();
         setupCategories();
         applyTheme();
+        updateDateLabel();
+        updateAccountLabel();
+
+        // 临时诊断：测量各区块实际高度，用于压缩布局
+        findViewById(android.R.id.content).post(() -> {
+            android.util.Log.d("Layout", "contentH=" + findViewById(android.R.id.content).getHeight());
+            int[] ids = {R.id.gridCategory, R.id.rowDate, R.id.btnSave};
+            String[] names = {"grid", "rowDate", "btnSave"};
+            for (int i = 0; i < ids.length; i++) {
+                View v = findViewById(ids[i]);
+                if (v != null) {
+                    android.util.Log.d("Layout", names[i] + " h=" + v.getHeight()
+                            + " y=" + v.getTop());
+                }
+            }
+            android.view.ViewGroup sv = findViewById(R.id.scrollRoot);
+            if (sv != null) {
+                android.util.Log.d("Layout", "scrollViewport h=" + sv.getHeight()
+                        + "  childContentH=" + ((android.view.View) sv.getChildAt(0)).getHeight());
+            }
+        });
     }
 
     // ==================================================================
@@ -145,46 +191,199 @@ public class AddRecordActivity extends AppCompatActivity {
     // ==================================================================
 
     /**
-     * 弹出日期修改弹窗。
+     * 日期选择弹窗：年 / 月 / 日 三列滚轮。
      *
-     * <p>内容为占位，用于验证弹窗的外框、动画与嵌套层级效果。
+     * <p>上下拖动切换，松手吸附；年月变化时自动修正"日"的合法范围
+     * （如 2 月只有 28/29 天）。
      */
     private void showDatePopup() {
+        final Calendar cal = Calendar.getInstance();
+        cal.setTimeInMillis(selectedDateMillis);
+
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
 
-        TextView hint = new TextView(this);
-        hint.setText("弹窗标题栏。\n弹窗内容栏 占位符占位符占位符占位符占位符占位符占位符。");
-        hint.setTextColor(0xFF666666);
-        hint.setTextSize(14f);
-        hint.setLineSpacing(dp(6), 1f);
-        box.addView(hint);
+        // 选中结果的实时预览
+        final TextView tvPreview = new TextView(this);
+        tvPreview.setTextColor(COLOR_PRIMARY);
+        tvPreview.setTextSize(18f);
+        tvPreview.setGravity(android.view.Gravity.CENTER);
+        tvPreview.setTypeface(null, android.graphics.Typeface.BOLD);
+        box.addView(tvPreview);
 
-        TextView nested = new TextView(this);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(44));
-        lp.topMargin = dp(18);
-        nested.setLayoutParams(lp);
-        nested.setGravity(android.view.Gravity.CENTER);
-        nested.setBackgroundResource(R.drawable.bg_chip);
-        nested.setText("测试嵌套弹窗");
-        nested.setTextColor(0xFFFF8A3D);
-        nested.setTextSize(14f);
-        nested.setOnClickListener(v -> showNestedPopup());
-        box.addView(nested);
+        // 三列滚轮容器
+        LinearLayout wheels = new LinearLayout(this);
+        wheels.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams wheelsLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(220));
+        wheelsLp.topMargin = dp(12);
+        wheels.setLayoutParams(wheelsLp);
+        wheels.setWeightSum(3f);
+        box.addView(wheels);
 
-        popupManager.show("我是功能弹窗", box);
+        final WheelView wYear = new WheelView(this);
+        final WheelView wMonth = new WheelView(this);
+        final WheelView wDay = new WheelView(this);
+        for (WheelView w : new WheelView[]{wYear, wMonth, wDay}) {
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.MATCH_PARENT, 1f);
+            w.setLayoutParams(lp);
+            wheels.addView(w);
+        }
+
+        // 年范围：前 50 年 ~ 后 10 年
+        int curYear = cal.get(Calendar.YEAR);
+        String[] years = new String[61];
+        for (int i = 0; i < 61; i++) {
+            years[i] = (curYear - 50 + i) + " 年";
+        }
+        wYear.setItems(years);
+
+        String[] months = new String[12];
+        for (int i = 0; i < 12; i++) {
+            months[i] = (i + 1) + " 月";
+        }
+        wMonth.setItems(months);
+
+        final int[] selYear = {cal.get(Calendar.YEAR)};
+        final int[] selMonth = {cal.get(Calendar.MONTH) + 1};
+        final int[] selDay = {cal.get(Calendar.DAY_OF_MONTH)};
+
+        wYear.setSelectedIndex(curYear - (curYear - 50));
+        wMonth.setSelectedIndex(selMonth[0] - 1);
+
+        // 按当前年月重建"日"列（天数随月份变化）
+        rebuildDays(wDay, selYear[0], selMonth[0], selDay);
+
+        // 更新预览
+        Runnable updatePreview = () -> tvPreview.setText(
+                selYear[0] + " 年 " + selMonth[0] + " 月 " + selDay[0] + " 日");
+
+        wYear.setOnItemSelectedListener((index, fromUser) -> {
+            selYear[0] = curYear - 50 + index;
+            rebuildDays(wDay, selYear[0], selMonth[0], selDay);
+            updatePreview.run();
+        });
+
+        wMonth.setOnItemSelectedListener((index, fromUser) -> {
+            selMonth[0] = index + 1;
+            rebuildDays(wDay, selYear[0], selMonth[0], selDay);
+            updatePreview.run();
+        });
+
+        wDay.setOnItemSelectedListener((index, fromUser) -> {
+            selDay[0] = index + 1;
+            updatePreview.run();
+        });
+
+        updatePreview.run();
+
+        // 底部胶囊按钮直接承担「确定」：用户填完只会点它
+        popupManager.showConfirm("选择日期", box, () -> {
+            Calendar picked = Calendar.getInstance();
+            picked.clear();
+            picked.set(selYear[0], selMonth[0] - 1, selDay[0]);
+            selectedDateMillis = picked.getTimeInMillis();
+            updateDateLabel();
+            popupManager.dismissTop();
+        });
     }
 
-    /** 嵌套弹窗，用于验证层级效果。 */
-    private void showNestedPopup() {
-        TextView hint = new TextView(this);
-        hint.setText("这是第二层弹窗。\n第一层弹窗已经上移并变淡，且无法交互。");
-        hint.setTextColor(0xFF666666);
-        hint.setTextSize(14f);
-        hint.setLineSpacing(dp(6), 1f);
+    /**
+     * 按年月重建"日"列：天数随月份变化，尽量保持原来选中的日。
+     */
+    private void rebuildDays(WheelView wDay, int year, int month, int[] selDay) {
+        int maxDay = daysInMonth(year, month);
+        if (selDay[0] > maxDay) {
+            selDay[0] = maxDay;
+        }
+        if (selDay[0] < 1) {
+            selDay[0] = 1;
+        }
+        String[] days = new String[maxDay];
+        for (int i = 0; i < maxDay; i++) {
+            days[i] = (i + 1) + " 日";
+        }
+        wDay.setItems(days);
+        wDay.setSelectedIndex(selDay[0] - 1);
+    }
 
-        popupManager.show("我是功能弹窗2号", hint);
+    /** 某年某月的天数。 */
+    private int daysInMonth(int year, int month) {
+        Calendar c = Calendar.getInstance();
+        c.clear();
+        c.set(year, month - 1, 1);
+        return c.getActualMaximum(Calendar.DAY_OF_MONTH);
+    }
+
+    /** 账户选择弹窗：点选某一项只是临时高亮，点「确定」才生效。 */
+    private void showAccountPopup() {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+
+        // 临时选中值，点确定前不影响页面
+        final String[] pending = {selectedAccount};
+        final TextView[] items = new TextView[ACCOUNTS.length];
+
+        for (int i = 0; i < ACCOUNTS.length; i++) {
+            final String acc = ACCOUNTS[i];
+            TextView item = new TextView(this);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dp(48));
+            item.setLayoutParams(lp);
+            item.setGravity(android.view.Gravity.CENTER_VERTICAL);
+            item.setPadding(dp(16), 0, dp(16), 0);
+            item.setText(acc);
+            item.setTextSize(15f);
+            items[i] = item;
+
+            item.setOnClickListener(v -> {
+                pending[0] = acc;
+                refreshAccountItems(items, pending[0]);
+            });
+            box.addView(item);
+        }
+        refreshAccountItems(items, pending[0]);
+
+        // 底部胶囊按钮承担「确定」
+        popupManager.showConfirm("选择账户", box, () -> {
+            selectedAccount = pending[0];
+            updateAccountLabel();
+            popupManager.dismissTop();
+        });
+    }
+
+    /** 刷新账户列表的选中高亮。 */
+    private void refreshAccountItems(TextView[] items, String selected) {
+        for (int i = 0; i < items.length; i++) {
+            boolean on = ACCOUNTS[i].equals(selected);
+            items[i].setTextColor(on ? COLOR_PRIMARY : 0xFF444444);
+            items[i].setBackgroundColor(on ? 0x14FF7F2E : 0x00000000);
+        }
+    }
+
+    /** 刷新日期行的显示。 */
+    private void updateDateLabel() {
+        TextView tvDate = findViewById(R.id.tvDate);
+        Calendar picked = Calendar.getInstance();
+        picked.setTimeInMillis(selectedDateMillis);
+
+        Calendar today = Calendar.getInstance();
+        boolean isToday = picked.get(Calendar.YEAR) == today.get(Calendar.YEAR)
+                && picked.get(Calendar.DAY_OF_YEAR) == today.get(Calendar.DAY_OF_YEAR);
+
+        if (isToday) {
+            tvDate.setText("今天");
+        } else {
+            tvDate.setText((picked.get(Calendar.MONTH) + 1) + " 月 "
+                    + picked.get(Calendar.DAY_OF_MONTH) + " 日");
+        }
+    }
+
+    /** 刷新账户行的显示。 */
+    private void updateAccountLabel() {
+        TextView tvAccount = findViewById(R.id.tvAccount);
+        tvAccount.setText(selectedAccount);
     }
 
     @Override
@@ -213,6 +412,8 @@ public class AddRecordActivity extends AppCompatActivity {
         isIncome = !isIncome;
         type = isIncome ? RecordStore.TYPE_INCOME : RecordStore.TYPE_EXPENSE;
         applyTheme();
+        // 收支使用两套不同分类，切换类型必须重建网格
+        setupCategories();
     }
 
     // ==================================================================
@@ -269,21 +470,31 @@ public class AddRecordActivity extends AppCompatActivity {
      *
      * <p>每项为竖排「圆形图标 + 名称」，选中时切换为橙描边 + 浅橙底。
      */
+    /**
+     * 构建分类网格。
+     *
+     * <p>按当前类型（收入/支出）填充两套不同的分类，
+     * 因此切换类型时需要重建。
+     */
     private void setupCategories() {
         GridLayout grid = findViewById(R.id.gridCategory);
+        grid.removeAllViews();
         grid.setColumnCount(4);
         grid.setRowCount(2);
 
-        int iconSize = dp(58);
-        int margin = dp(6);
+        String[] names = currentCategoryNames();
+        selectedCategory = -1;
 
-        for (int i = 0; i < CATEGORY_NAMES.length; i++) {
+        int iconSize = dp(52);
+        int margin = dp(4);
+
+        for (int i = 0; i < names.length; i++) {
             final int index = i;
 
             LinearLayout item = new LinearLayout(this);
             item.setOrientation(LinearLayout.VERTICAL);
             item.setGravity(Gravity.CENTER_HORIZONTAL);
-            item.setPadding(dp(4), dp(8), dp(4), dp(8));
+            item.setPadding(dp(4), dp(4), dp(4), dp(4));
 
             GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
             lp.width = 0;
@@ -297,11 +508,11 @@ public class AddRecordActivity extends AppCompatActivity {
             TextView icon = new TextView(this);
             icon.setLayoutParams(new LinearLayout.LayoutParams(iconSize, iconSize));
             icon.setGravity(Gravity.CENTER);
-            icon.setText(CATEGORY_NAMES[i].substring(0, 1));
-            icon.setTextColor(CATEGORY_COLORS[i]);
+            icon.setText(names[i].substring(0, 1));
+            icon.setTextColor(CATEGORY_COLORS[i % CATEGORY_COLORS.length]);
             icon.setTextSize(17f);
             icon.setTypeface(Typeface.DEFAULT_BOLD);
-            icon.setBackground(circleBg(CATEGORY_BG[i], 0));
+            icon.setBackground(circleBg(CATEGORY_BG[i % CATEGORY_BG.length], 0));
             item.addView(icon);
 
             // 名称
@@ -309,9 +520,9 @@ public class AddRecordActivity extends AppCompatActivity {
             LinearLayout.LayoutParams textLp = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT);
-            textLp.topMargin = dp(6);
+            textLp.topMargin = dp(4);
             label.setLayoutParams(textLp);
-            label.setText(CATEGORY_NAMES[i]);
+            label.setText(names[i]);
             label.setTextColor(0xFF6B6B6B);
             label.setTextSize(12f);
             item.addView(label);
@@ -324,15 +535,22 @@ public class AddRecordActivity extends AppCompatActivity {
         }
     }
 
+    /** 当前类型对应的分类名数组。 */
+    private String[] currentCategoryNames() {
+        return isIncome ? INCOME_CATEGORY_NAMES : CATEGORY_NAMES;
+    }
+
     /** 选中某个分类，并刷新所有分类的选中态。 */
     private void selectCategory(int index) {
         selectedCategory = index;
 
         for (int i = 0; i < categoryIcons.length; i++) {
+            if (categoryIcons[i] == null) continue;
             if (i == index) {
                 categoryIcons[i].setBackground(circleBg(0xFFFFF0E6, dp(2)));
             } else {
-                categoryIcons[i].setBackground(circleBg(CATEGORY_BG[i], 0));
+                categoryIcons[i].setBackground(
+                        circleBg(CATEGORY_BG[i % CATEGORY_BG.length], 0));
             }
         }
     }
@@ -345,6 +563,12 @@ public class AddRecordActivity extends AppCompatActivity {
         String text = etAmount.getText().toString().trim();
         if (TextUtils.isEmpty(text)) {
             toast("请输入金额");
+            return;
+        }
+
+        // 分类必须选，否则账单里会出现"无分类"的记录
+        if (selectedCategory < 0) {
+            toast("请选择分类");
             return;
         }
 
@@ -362,9 +586,15 @@ public class AddRecordActivity extends AppCompatActivity {
         }
 
         EditText etNote = findViewById(R.id.etNote);
+        String categoryName = currentCategoryNames()[selectedCategory];
+
         RecordStore.add(new RecordStore.Record(
-                type, amount, etNote.getText().toString().trim(),
-                System.currentTimeMillis()));
+                type,
+                amount,
+                etNote.getText().toString().trim(),
+                selectedDateMillis,
+                categoryName,
+                selectedAccount));
 
         toast(isIncome ? "已记一笔收入" : "已记一笔支出");
         finish();

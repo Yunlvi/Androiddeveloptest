@@ -121,6 +121,30 @@ public class PopupManager {
      * @param content 内容视图，可为 null
      * @return 新建的弹窗
      */
+    /**
+     * 弹出一个新弹窗，底部按钮显示为「确定」，点击后执行确认动作再关闭。
+     *
+     * <p>适用于用户填完只会点确认的表单类弹窗：
+     * 与其摆一个多余的关闭按钮，不如让它直接承担确认职责。
+     *
+     * @param title      标题
+     * @param content    内容视图
+     * @param onConfirm  确认动作（先执行，成功后由调用方自行决定是否关闭）
+     * @return 新建的弹窗；被防抖拦截时返回 null
+     */
+    public PopupView showConfirm(String title, View content, Runnable onConfirm) {
+        PopupView popup = show(title, content);
+        if (popup == null) return null;
+        popup.setButtonIcon("\u2713");
+        popup.setButtonText("\u786e\u5b9a");
+        popup.setOnCloseListener(() -> {
+            if (onConfirm != null) {
+                onConfirm.run();
+            }
+        });
+        return popup;
+    }
+
     public PopupView show(String title, View content) {
         // 防抖：快速连点时，第一次点击到弹窗显示之间遮罩尚未接管，
         // 第二次点击会穿透到页面内容再次触发 show，导致叠出重复弹窗

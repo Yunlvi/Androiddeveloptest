@@ -47,6 +47,7 @@
 
     <!-- 可滚动内容 -->
     <ScrollView
+        android:id="@+id/scrollRoot"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
@@ -135,7 +136,7 @@
                         android:layout_weight="1"
                         android:background="@drawable/bg_chip"
                         android:gravity="center"
-                        android:text="10"
+                        android:text="+10"
                         android:textColor="#FF8A3D"
                         android:textSize="14sp" />
 
@@ -147,7 +148,7 @@
                         android:layout_weight="1"
                         android:background="@drawable/bg_chip"
                         android:gravity="center"
-                        android:text="20"
+                        android:text="+20"
                         android:textColor="#FF8A3D"
                         android:textSize="14sp" />
 
@@ -159,7 +160,7 @@
                         android:layout_weight="1"
                         android:background="@drawable/bg_chip"
                         android:gravity="center"
-                        android:text="50"
+                        android:text="+50"
                         android:textColor="#FF8A3D"
                         android:textSize="14sp" />
 
@@ -170,7 +171,7 @@
                         android:layout_weight="1"
                         android:background="@drawable/bg_chip"
                         android:gravity="center"
-                        android:text="100"
+                        android:text="+100"
                         android:textColor="#FF8A3D"
                         android:textSize="14sp" />
                 </LinearLayout>
@@ -192,7 +193,7 @@
                 android:id="@+id/gridCategory"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
+                android:layout_marginTop="8dp"
                 android:columnCount="4"
                 android:rowCount="2" />
 

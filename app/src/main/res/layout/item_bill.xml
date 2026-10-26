@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 账单列表项：纯白背景，项间用浅色分割线，整体连成一片 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="4dp"
+        android:paddingTop="14dp"
+        android:paddingEnd="4dp"
+        android:paddingBottom="14dp">
+
+        <!-- 分类圆标（暂用首字） -->
+        <TextView
+            android:id="@+id/tvItemIcon"
+            android:layout_width="42dp"
+            android:layout_height="42dp"
+            android:gravity="center"
+            android:text="餐"
+            android:textColor="#F5A623"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <!-- 名称 + 备注 -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/tvItemCategory"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="餐饮"
+                android:textColor="#2B2B2B"
+                android:textSize="15sp" />
+
+            <TextView
+                android:id="@+id/tvItemSub"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:text="10月15日 · 现金"
+                android:textColor="#ACACAC"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <!-- 金额 -->
+        <TextView
+            android:id="@+id/tvItemAmount"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="-50.00"
+            android:textColor="#E5484D"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- 分割线：从文字左侧开始，不贯穿整行 -->
+    <View
+        android:id="@+id/viewDivider"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginStart="58dp"
+        android:background="#F2EFEA" />
+
+</LinearLayout>
