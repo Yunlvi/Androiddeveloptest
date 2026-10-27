@@ -25,6 +25,10 @@
 
         <!-- ★ 加在这里：application 内部 -->
         <activity
+            android:name=".SettingsActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".AddRecordActivity"
             android:exported="false" />
 

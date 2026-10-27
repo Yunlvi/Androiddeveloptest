@@ -135,7 +135,6 @@ public class PopupManager {
     public PopupView showConfirm(String title, View content, Runnable onConfirm) {
         PopupView popup = show(title, content);
         if (popup == null) return null;
-        popup.setButtonIcon("\u2713");
         popup.setButtonText("\u786e\u5b9a");
         popup.setOnCloseListener(() -> {
             if (onConfirm != null) {

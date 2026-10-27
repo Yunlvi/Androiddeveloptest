@@ -68,10 +68,10 @@ public class AddRecordActivity extends AppCompatActivity {
     /** 记账日期（当天 0 点）。默认今天。 */
     private long selectedDateMillis;
     /** 当前账户。 */
-    private String selectedAccount = "现金";
+    private String selectedAccount = "现金";   // onCreate 中按设置覆盖
 
     /** 金额清空按钮。 */
-    private TextView btnClear;
+    private android.widget.ImageView btnClear;
 
     /** 弹窗栈管理器。 */
     private PopupManager popupManager;
@@ -99,6 +99,10 @@ public class AddRecordActivity extends AppCompatActivity {
 
         type = getIntent().getIntExtra(EXTRA_TYPE, RecordStore.TYPE_EXPENSE);
         isIncome = (type == RecordStore.TYPE_INCOME);
+
+        // 默认账户取设置页的选择
+        SettingsStore.init(this);
+        selectedAccount = SettingsStore.getDefaultAccount();
 
         // 默认日期：今天 0 点
         Calendar today = Calendar.getInstance();
@@ -165,6 +169,9 @@ public class AddRecordActivity extends AppCompatActivity {
         applyTheme();
         updateDateLabel();
         updateAccountLabel();
+
+        // 顶部悬浮显示学号姓名（作业要求静态展示）
+        StudentWatermark.attach(this);
 
     }
 

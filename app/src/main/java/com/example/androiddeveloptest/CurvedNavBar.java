@@ -53,10 +53,10 @@ public class CurvedNavBar extends View {
     private static final long LONG_PRESS_MS = 400;
 
     /** 选中项颜色（明黄）。 */
-    private static final int COLOR_SELECTED = 0xFFFF7F2E;
+    private int colorSelected = 0xFFFF7F2E;
 
     /** 未选中项颜色（白）。 */
-    private static final int COLOR_UNSELECTED = 0xB3FF7F2E;
+    private int colorUnselected = 0xB3FF7F2E;
 
     /** 弧带底色（深蓝）。 */
     private static final int COLOR_ARC = 0xFF16506B;
@@ -233,10 +233,9 @@ public class CurvedNavBar extends View {
         edgePaint.setStrokeCap(Paint.Cap.ROUND);
 
         // PorterDuff.Mode.SRC_IN：保留图标本身的透明度，只替换颜色
-        filterSelected = new PorterDuffColorFilter(COLOR_SELECTED, PorterDuff.Mode.SRC_IN);
-        filterUnselected = new PorterDuffColorFilter(COLOR_UNSELECTED, PorterDuff.Mode.SRC_IN);
+        applyThemeColors();
 
-        textPaint.setColor(COLOR_UNSELECTED);
+        textPaint.setColor(colorUnselected);
         textPaint.setTextAlign(Paint.Align.CENTER);
 
         // 下标顺序即弧线上从左到右的顺序
@@ -263,6 +262,23 @@ public class CurvedNavBar extends View {
         buildArcPaths();
         computeItemLayout(w, h);
         computeGlow(w);
+    }
+
+    /**
+     * 按设置页选择的主题更新选中色。
+     *
+     * <p>由外部在主题变化后调用，或构造时自动读取一次。
+     */
+    public void applyThemeColors() {
+        int primary = SettingsStore.primaryColor();
+        colorSelected = primary;
+        // 未选中项用同色系的 70% 透明版本，保持整体协调
+        colorUnselected = (primary & 0x00FFFFFF) | 0xB3000000;
+
+        filterSelected = new PorterDuffColorFilter(colorSelected, PorterDuff.Mode.SRC_IN);
+        filterUnselected = new PorterDuffColorFilter(colorUnselected, PorterDuff.Mode.SRC_IN);
+        textPaint.setColor(colorUnselected);
+        invalidate();
     }
 
     /** dp 转 px。 */
@@ -416,9 +432,9 @@ public class CurvedNavBar extends View {
         RadialGradient shader = new RadialGradient(
                 glowX, glowY, glowRadius,
                 new int[]{
-                        0x00FF7F2E,   // 中心：全透明
-                        0x4DFF7F2E,   // 中段：橙 30%
-                        0x00FF7F2E    // 外圈：全透明
+                        (colorSelected & 0x00FFFFFF),                 // 中心：全透明
+                        (colorSelected & 0x00FFFFFF) | 0x4D000000,    // 中段：30%
+                        (colorSelected & 0x00FFFFFF)                 // 外圈：全透明
                 },
                 new float[]{0f, 0.35f, 1f},
                 Shader.TileMode.CLAMP);
@@ -438,7 +454,7 @@ public class CurvedNavBar extends View {
             NavItem item = items[i];
 
             iconPaint.setColorFilter(item.selected ? filterSelected : filterUnselected);
-            textPaint.setColor(item.selected ? COLOR_SELECTED : COLOR_UNSELECTED);
+            textPaint.setColor(item.selected ? colorSelected : colorUnselected);
 
             float scale = (i == pressedIndex) ? pressScale : 1f;
             item.draw(canvas, iconPaint, textPaint, textGap, verticalAdjust, scale);

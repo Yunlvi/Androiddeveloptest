@@ -19,6 +19,9 @@ import androidx.core.view.WindowInsetsCompat;
 
 public class MainActivity extends AppCompatActivity {
 
+    /** 换行分隔符。 */
+    private static final String NEWLINE = System.lineSeparator();
+
     private CurvedNavBar navBar;
     private FrameLayout pagerContainer;
 
@@ -53,8 +56,8 @@ public class MainActivity extends AppCompatActivity {
 
         // 右下角：设置
         findViewById(R.id.fabSettings).setOnClickListener(v ->
-                android.widget.Toast.makeText(this, "设置功能占位符",
-                        android.widget.Toast.LENGTH_SHORT).show());
+                startActivity(new android.content.Intent(
+                        this, SettingsActivity.class)));
     }
 
     /** 跳转到"记一笔"页面。 */
@@ -163,6 +166,35 @@ public class MainActivity extends AppCompatActivity {
         lvBills.setVisibility(all.isEmpty() ? View.GONE : View.VISIBLE);
         billPage.findViewById(R.id.tvBillEmpty)
                 .setVisibility(all.isEmpty() ? View.VISIBLE : View.GONE);
+    }
+
+    /**
+     * 按设置页的复选框状态显示首页提醒提示。
+     *
+     * <p>三项全关时隐藏；开启任意一项则拼接显示。
+     */
+    private void refreshReminderTip() {
+        if (pages[2] == null) return;
+        TextView tv = pages[2].findViewById(R.id.tvReminder);
+        if (tv == null) return;
+
+        java.util.List<String> on = new java.util.ArrayList<>();
+        if (SettingsStore.isRemindOn(SettingsStore.KEY_REMIND_DAILY)) {
+            on.add("每日记账提醒已开启");
+        }
+        if (SettingsStore.isRemindOn(SettingsStore.KEY_REMIND_BIG)) {
+            on.add("大额支出提醒已开启");
+        }
+        if (SettingsStore.isRemindOn(SettingsStore.KEY_REMIND_MONTHLY)) {
+            on.add("月度报表汇总已开启");
+        }
+
+        if (on.isEmpty()) {
+            tv.setVisibility(View.GONE);
+        } else {
+            tv.setVisibility(View.VISIBLE);
+            tv.setText(android.text.TextUtils.join(NEWLINE, on));
+        }
     }
 
     /** 金额格式化：整数不带小数。 */
@@ -276,6 +308,14 @@ public class MainActivity extends AppCompatActivity {
         super.onResume();
         refreshHomeData();
         refreshBillPage();
+        // 从设置页返回后，主题可能已改变
+        if (navBar != null) {
+            navBar.applyThemeColors();
+        }
+        refreshReminderTip();
+
+        // 顶部悬浮显示学号姓名（作业要求静态展示）
+        StudentWatermark.attach(this);
     }
 
     /**

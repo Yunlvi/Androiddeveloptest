@@ -52,7 +52,7 @@ public class PopupView extends FrameLayout {
     /** 面板背景，切换按钮数量时需要重设挖槽宽度。 */
     private AsymmetricRoundDrawable panelBg;
     /** 底部胶囊按钮内的图标与文案。 */
-    private final TextView tvButtonIcon;
+    private final android.widget.ImageView tvButtonIcon;
     private final TextView tvButtonLabel;
     private final FrameLayout panel;
     private final LinearLayout contentContainer;
@@ -179,10 +179,10 @@ public class PopupView extends FrameLayout {
         }
     }
 
-    /** 设置底部胶囊按钮左侧的图标（如 × 或 ✓）。 */
-    void setButtonIcon(String icon) {
+    /** 图标已固定为勾，此处保留接口以便外部按需调整颜色。 */
+    void setButtonIcon(int tintColor) {
         if (tvButtonIcon != null) {
-            tvButtonIcon.setText(icon);
+            tvButtonIcon.setColorFilter(tintColor);
         }
     }
 
@@ -218,14 +218,12 @@ public class PopupView extends FrameLayout {
 
         // 右侧按钮承担确认，改用橙黄配色呼应顶部装饰条
         btnClose.setBackgroundResource(R.drawable.bg_popup_confirm);
-        if (tvButtonIcon != null) {
-            tvButtonIcon.setTextColor(0xFFFFFFFF);
-        }
+        // 图标与文字在橙黄底上统一用白色
+        setButtonIcon(0xFFFFFFFF);
         if (tvButtonLabel != null) {
             tvButtonLabel.setTextColor(0xFFFFFFFF);
             tvButtonLabel.setTypeface(null, android.graphics.Typeface.BOLD);
         }
-        setButtonIcon("\u2713");
         setButtonText(confirmText == null ? "\u786e\u8ba4" : confirmText);
         this.onCloseListener = onConfirm;
 
