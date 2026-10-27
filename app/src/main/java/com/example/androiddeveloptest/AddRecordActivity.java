@@ -115,8 +115,8 @@ public class AddRecordActivity extends AppCompatActivity {
         btnClear = findViewById(R.id.btnClear);
 
         findViewById(R.id.btnBack).setOnClickListener(v -> finish());
-        findViewById(R.id.btnDraft).setOnClickListener(v ->
-                toast("草稿功能占位符"));
+        findViewById(R.id.btnDraft).setOnClickListener(v -> showDraftConfirmPopup());
+        findViewById(R.id.btnToolDraft).setOnClickListener(v -> showDraftConfirmPopup());
 
         btnSwitchType.setOnClickListener(v -> switchType());
         findViewById(R.id.btnSave).setOnClickListener(v -> save());
@@ -342,6 +342,27 @@ public class AddRecordActivity extends AppCompatActivity {
             items[i].setTextColor(on ? COLOR_PRIMARY : 0xFF444444);
             items[i].setBackgroundColor(on ? 0x14FF7F2E : 0x00000000);
         }
+    }
+
+    /**
+     * 存草稿的二次确认弹窗（双按钮形态示例）。
+     */
+    private void showDraftConfirmPopup() {
+        android.util.Log.d("Draft", "showDraftConfirmPopup called");
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+
+        TextView hint = new TextView(this);
+        hint.setText("当前填写的金额与分类将保存为草稿，稍后可继续编辑。");
+        hint.setTextColor(0xFF666666);
+        hint.setTextSize(14f);
+        hint.setLineSpacing(dp(6), 1f);
+        box.addView(hint);
+
+        popupManager.showDouble("保存草稿", box, "确认", () -> {
+            toast("已保存草稿");
+            popupManager.dismissTop();
+        });
     }
 
     /** 刷新日期行的显示。 */

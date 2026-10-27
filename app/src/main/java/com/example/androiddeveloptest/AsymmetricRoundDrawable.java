@@ -71,9 +71,16 @@ public class AsymmetricRoundDrawable extends Drawable {
     private float notchRadius = 0f;
     /** 挖槽顶边相对面板底边向上嵌入的深度（px）。 */
     private float notchTopOverlap = 0f;
+    /**
+     * 多挖槽时每个槽相对面板中心线的水平偏移（px）。
+     *
+     * <p>null 或空数组表示只在正中挖一个槽。
+     * 例如双按钮时传 {-offset, +offset}，挖出两个独立的孔。
+     */
+    private float[] notchCenters = null;
 
     /**
-     * 在面板底部中央挖一个"放大版按钮形状"的透明缺口。
+     * 在面板底部挖一个"放大版按钮形状"的透明缺口（居中）。
      *
      * <p>挖槽圆角 = 按钮圆角 + gap，四周向外扩 gap，
      * 因此挖出的边缘与按钮轮廓处处等距，间隔自然均匀。
@@ -87,21 +94,47 @@ public class AsymmetricRoundDrawable extends Drawable {
     public void setBottomNotchByButton(float buttonWidth, float buttonHeight,
                                        float buttonRadius, float gap,
                                        float topOverlap) {
+        setBottomNotchByButton(buttonWidth, buttonHeight, buttonRadius,
+                gap, topOverlap, null);
+    }
+
+    /**
+     * 在面板底部挖多个独立缺口（每个按钮一个孔）。
+     *
+     * @param centers 各槽中心相对面板中心的水平偏移（px）；
+     *                null 表示居中单槽
+     */
+    public void setBottomNotchByButton(float buttonWidth, float buttonHeight,
+                                       float buttonRadius, float gap,
+                                       float topOverlap, float[] centers) {
         this.notchWidth = buttonWidth + gap * 2;
         this.notchHeight = buttonHeight + gap * 2;
         this.notchRadius = buttonRadius + gap;
         this.notchTopOverlap = topOverlap;
+        this.notchCenters = centers;
         invalidateSelf();
     }
 
-    /** 构建挖槽路径。 */
+    /** 构建挖槽路径（支持多个独立缺口的并集）。 */
     private Path buildNotchPath(Rect b) {
         Path p = new Path();
-        float cx = b.centerX();
-        float left = cx - notchWidth / 2f;
+        float baseCx = b.centerX();
         float top = b.bottom - notchTopOverlap;
-        RectF nr = new RectF(left, top, left + notchWidth, top + notchHeight);
-        p.addRoundRect(nr, notchRadius, notchRadius, Path.Direction.CW);
+
+        if (notchCenters == null || notchCenters.length == 0) {
+            // 单槽：居中
+            RectF nr = new RectF(baseCx - notchWidth / 2f, top,
+                    baseCx + notchWidth / 2f, top + notchHeight);
+            p.addRoundRect(nr, notchRadius, notchRadius, Path.Direction.CW);
+        } else {
+            // 多槽：各自偏移
+            for (float off : notchCenters) {
+                float cx = baseCx + off;
+                RectF nr = new RectF(cx - notchWidth / 2f, top,
+                        cx + notchWidth / 2f, top + notchHeight);
+                p.addRoundRect(nr, notchRadius, notchRadius, Path.Direction.CW);
+            }
+        }
         return p;
     }
 

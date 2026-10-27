@@ -145,11 +145,36 @@ public class PopupManager {
         return popup;
     }
 
+    /**
+     * 弹出双按钮弹窗：左侧「取消」、右侧「确认」。
+     *
+     * <p>适用于需要用户明确抉择的场景（如确认删除、二次确认）。
+     * 取消固定为关闭弹窗；确认执行回调后由调用方决定是否关闭。
+     *
+     * @param title       标题
+     * @param content     内容视图
+     * @param confirmText 确认按钮文案
+     * @param onConfirm   确认动作
+     * @return 新建的弹窗；被防抖拦截时返回 null
+     */
+    public PopupView showDouble(String title, View content,
+                                String confirmText, Runnable onConfirm) {
+        PopupView popup = show(title, content);
+        if (popup == null) return null;
+        popup.setDoubleButtons(confirmText, () -> {
+            if (onConfirm != null) {
+                onConfirm.run();
+            }
+        }, this::dismissTop);
+        return popup;
+    }
+
     public PopupView show(String title, View content) {
         // 防抖：快速连点时，第一次点击到弹窗显示之间遮罩尚未接管，
         // 第二次点击会穿透到页面内容再次触发 show，导致叠出重复弹窗
         long now = android.os.SystemClock.uptimeMillis();
         if (now - lastShowTime < 350) {
+            android.util.Log.d("Draft", "debounce blocked, delta=" + (now - lastShowTime));
             return null;
         }
         lastShowTime = now;

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 双按钮弹窗的确认按钮：橙黄渐变，取自顶部装饰条配色 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_pressed="true">
+        <shape android:shape="rectangle">
+            <corners android:radius="25dp" />
+            <gradient
+                android:angle="0"
+                android:startColor="#F5A021"
+                android:endColor="#F7B94A"
+                android:type="linear" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="25dp" />
+            <gradient
+                android:angle="0"
+                android:startColor="#FCA92F"
+                android:endColor="#FEC65A"
+                android:type="linear" />
+        </shape>
+    </item>
+</selector>

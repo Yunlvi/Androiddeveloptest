@@ -29,17 +29,28 @@ public class PopupView extends FrameLayout {
     private static final float PANEL_CORNER_BOTTOM_RIGHT_DP = 0f;
     /** 关闭按钮高度的一半，用于定位到面板底边。 */
     private static final float CLOSE_BUTTON_HALF_DP = 25f;
-    /** 关闭按钮宽度。 */
+    /** 单按钮时的按钮宽度。 */
     private static final float CLOSE_BUTTON_WIDTH_DP = 140f;
+    /** 双按钮时每个按钮的宽度，与单按钮保持一致。 */
+    private static final float DOUBLE_BUTTON_WIDTH_DP = 132f;
+    /** 双按钮之间的间距。 */
+    private static final float BUTTON_GAP_DP = 28f;
     /** 关闭按钮圆角半径（高度的一半 = 胶囊形）。 */
     private static final float CLOSE_BUTTON_RADIUS_DP = 25f;
-    /** 按钮与挖槽边缘的透明间隔。 */
-    private static final float NOTCH_GAP_DP = 8f;
+    /** 按钮与挖槽边缘的透明间隔（单按钮）。 */
+    private static final float NOTCH_GAP_DP = 4f;
+    /** 双按钮时用更小的间隔，避免两孔整体显得比单按钮更大。 */
+    private static final float DOUBLE_NOTCH_GAP_DP = 4f;
     /** 面板右边外扩量（px），用于对齐橙条右边缘。
      *  关闭按钮必须使用相同的值，否则与挖槽错位。 */
     private static final int PANEL_RIGHT_EXTEND_PX = -7;
 
     private final TextView tvTitle;
+    /** 底部按钮容器，内含取消与确认按钮。 */
+    private final LinearLayout btnBar;
+
+    /** 面板背景，切换按钮数量时需要重设挖槽宽度。 */
+    private AsymmetricRoundDrawable panelBg;
     /** 底部胶囊按钮内的图标与文案。 */
     private final TextView tvButtonIcon;
     private final TextView tvButtonLabel;
@@ -94,6 +105,7 @@ public class PopupView extends FrameLayout {
         tvTitle = findViewById(R.id.tvTitle);
         tvButtonIcon = findViewById(R.id.btnCloseIcon);
         tvButtonLabel = findViewById(R.id.btnCloseLabel);
+        btnBar = findViewById(R.id.btnBar);
         panel = findViewById(R.id.panel);
         contentContainer = findViewById(R.id.contentContainer);
         View btnClose = findViewById(R.id.btnClose);
@@ -111,15 +123,10 @@ public class PopupView extends FrameLayout {
                 PANEL_CORNER_BOTTOM_RIGHT_DP, PANEL_CORNER_BOTTOM_LEFT_DP,
                 density);
 
-        // 面板底部中央挖"放大版按钮形状"的缺口：
-        // 挖槽 = 按钮轮廓向外扩 NOTCH_GAP_DP，圆角同步放大，轮廓处处等距
-        panelBg.setBottomNotchByButton(
-                CLOSE_BUTTON_WIDTH_DP * density,
-                CLOSE_BUTTON_HALF_DP * 2 * density,
-                CLOSE_BUTTON_RADIUS_DP * density,
-                NOTCH_GAP_DP * density,
-                (CLOSE_BUTTON_HALF_DP + NOTCH_GAP_DP) * density);
-
+        // 面板底部中央挖缺口。默认单按钮，宽度按单个按钮计算；
+        // 若外部切换为双按钮模式，会重新计算挖槽
+        this.panelBg = panelBg;
+        applyNotchFor(1);
         panel.setBackground(panelBg);
 
         // 面板右边外扩：用面板去对齐橙条右边缘
@@ -177,6 +184,88 @@ public class PopupView extends FrameLayout {
         if (tvButtonIcon != null) {
             tvButtonIcon.setText(icon);
         }
+    }
+
+    /**
+     * 切换为双按钮模式：左侧「取消」、右侧「确认」。
+     *
+     * <p>两个按钮并排居中，挖槽宽度同步扩大为容纳两个按钮。
+     *
+     * @param confirmText 右侧按钮文案，如"确认"
+     * @param onConfirm   右侧按钮点击
+     * @param onCancel    左侧按钮点击（通常为关闭弹窗，由调用方传入）
+     */
+    void setDoubleButtons(String confirmText, Runnable onConfirm, Runnable onCancel) {
+        View btnCancel = findViewById(R.id.btnCancel);
+        View btnClose = findViewById(R.id.btnClose);
+        if (btnCancel == null || btnClose == null || btnBar == null) return;
+
+        // 按钮变窄，并排摆放
+        LinearLayout.LayoutParams closeLp =
+                (LinearLayout.LayoutParams) btnClose.getLayoutParams();
+        closeLp.width = dp((int) DOUBLE_BUTTON_WIDTH_DP);
+        btnClose.setLayoutParams(closeLp);
+
+        LinearLayout.LayoutParams cancelLp =
+                (LinearLayout.LayoutParams) btnCancel.getLayoutParams();
+        cancelLp.width = dp((int) DOUBLE_BUTTON_WIDTH_DP);
+        cancelLp.setMarginEnd(dp((int) BUTTON_GAP_DP));
+        btnCancel.setLayoutParams(cancelLp);
+        btnCancel.setVisibility(View.VISIBLE);
+
+        // 挖槽扩宽以容纳两个按钮
+        applyNotchFor(2);
+
+        // 右侧按钮承担确认，改用橙黄配色呼应顶部装饰条
+        btnClose.setBackgroundResource(R.drawable.bg_popup_confirm);
+        if (tvButtonIcon != null) {
+            tvButtonIcon.setTextColor(0xFFFFFFFF);
+        }
+        if (tvButtonLabel != null) {
+            tvButtonLabel.setTextColor(0xFFFFFFFF);
+            tvButtonLabel.setTypeface(null, android.graphics.Typeface.BOLD);
+        }
+        setButtonIcon("\u2713");
+        setButtonText(confirmText == null ? "\u786e\u8ba4" : confirmText);
+        this.onCloseListener = onConfirm;
+
+        // 左侧按钮：取消
+        btnCancel.setOnClickListener(v -> {
+            if (onCancel != null) {
+                onCancel.run();
+            }
+        });
+    }
+
+    /**
+     * 按按钮数量重算底部挖槽。
+     *
+     * @param count 1 = 单按钮，2 = 双按钮（含中间间距）
+     */
+    private void applyNotchFor(int count) {
+        if (panelBg == null) return;
+
+        float density = getResources().getDisplayMetrics().density;
+        float btnW = count == 2 ? DOUBLE_BUTTON_WIDTH_DP : CLOSE_BUTTON_WIDTH_DP;
+
+        // 双按钮：挖两个独立的孔，各对齐一个按钮的中心；
+        // 使用更小的 gap，避免两个孔整体显得比单按钮更"胖"
+        float gapDp = count == 2 ? DOUBLE_NOTCH_GAP_DP : NOTCH_GAP_DP;
+
+        float[] centers = null;
+        if (count == 2) {
+            float halfStep = (btnW + BUTTON_GAP_DP) / 2f;
+            centers = new float[]{-halfStep * density, halfStep * density};
+        }
+
+        panelBg.setBottomNotchByButton(
+                btnW * density,
+                CLOSE_BUTTON_HALF_DP * 2 * density,
+                CLOSE_BUTTON_RADIUS_DP * density,
+                gapDp * density,
+                (CLOSE_BUTTON_HALF_DP + gapDp) * density,
+                centers);
+        panel.invalidate();
     }
 
     /** 设置标题。 */
