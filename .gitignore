@@ -8,3 +8,7 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# 讲解录屏体积过大（115MB），改放到 GitHub Releases 附件
+安卓app演示视频.mp4
+*.mp4

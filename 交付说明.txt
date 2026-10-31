@@ -1,0 +1,42 @@
+计算机242  2406100211  高润泽
+《金融系统应用开发与实践》平时作业
+
+【交付内容】
+1. 计算机242-2406100211-高润泽.apk
+   可直接安装运行的调试版安装包，minSdk 24，目标设备为 Android 7.0 及以上。
+
+2. 计算机242-2406100211-高润泽-设计开发文档.docx
+   含设计思路、实现的功能、用到的课程知识点、遇到的问题及解决方法。
+
+3. 计算机242-2406100211-高润泽-讲解录屏.mp4
+   先讲设计思路与课程知识点，再演示功能。
+
+4. 源码/
+   完整 Android Studio 工程，可直接导入编译。
+
+【源码运行说明】
+由于工程使用了 Gradle 与 Android SDK，需要本机配置后编译：
+  1. 用 Android Studio 打开「源码」目录；
+  2. 首次打开会提示配置 SDK 路径，按提示选择本机 Android SDK；
+     或手动在工程根目录新建 local.properties，写入：
+         sdk.dir=Android SDK路径
+  3. 等待 Gradle 同步完成后，点击运行即可安装到模拟器或真机。
+
+注意：本工程需放在不含中文字符的路径下，否则 Android Gradle 插件会拒绝编译。
+
+【项目简介】
+一个记账类 App，主要功能包括：
+  - 自定义绘制的弧形导航栏，支持拖动跟手、松手吸附与长按进入拖动模式；
+  - 记账页：金额录入、快捷累加、收支两套分类、三列滚轮日期选择、账户选择；
+  - 账单页：收支记录列表与汇总，配合 BaseAdapter 实现；
+  - 设置页：RadioGroup 主题切换、Spinner 默认账户、CheckBox 提醒开关，
+    三项设置均真实影响其他页面；
+  - 底部弹出式弹窗系统，支持多层嵌套与三种按钮形态；
+  - 数据使用 SharedPreferences 持久化，关闭 App 后记录保留。
+
+【作业实现】
+  - Activity：MainActivity、AddRecordActivity、SettingsActivity，共 3 个；
+  - Intent 传值：主页跳转记账页时传递收入/支出类型；
+  - 基础控件：TextView、EditText、Button 正常交互；
+  - 备选控件：ListView、RadioGroup、CheckBox、Spinner、ImageButton，共 5 种；
+  - 姓名学号：所有页面顶部以悬浮水印形式静态显示，运行时不可编辑。
